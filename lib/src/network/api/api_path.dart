@@ -1,6 +1,6 @@
 class ApiPath {
   // Base Endpoints
-  static const String baseUrl = 'https://your-domain-name.com/api';
+  static const String baseUrl = 'https://ecardo.ir/api';
 
   // Common Endpoints
   static const String countriesEndpoint = '/get-countries';
