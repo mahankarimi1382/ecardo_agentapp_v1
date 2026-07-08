@@ -1,789 +1,814 @@
-# Audit Report: ecardo_merchantapp_v1 (Merchant App)
+# Audit Report: ecardo_agentapp_v1 (Agent App)
 
-> Repository: `/home/z/my-project/repos/ecardo_merchantapp_v1`
-> Audit scope: Identity, Localization (for 5 target regions: CN, IR, TR, RU, AE), Fonts, Theme, Network, Architecture, Date/Currency, Country, Screens, Security, Performance, Build/CI, Deep Links, Push, Biometrics, Merchant-specific features, Region-specific gaps.
+> Repository: `/home/z/my-project/repos/ecardo_agentapp_v1`
+> Commit audited: `85155ff` ("change baseurl and fix build bg") on top of `7ae60ce` ("Initial commit")
+> App domain: ecardo.ir  ·  Target regions: China, Iran, Turkey, Russia, UAE
+> App type: Flutter / GetX / Dio  ·  Agent (cash-in / cash-out) app for a fintech platform
 
 ---
 
 ## Executive Summary
 
-The repository is a Flutter (Dart 3.9.2 / Flutter 3.35.7) mobile-banking/fintech **merchant** app built on **GetX** for state, DI, and routing, on top of **Dio** for HTTP and **shared_preferences** for persistence. The codebase is well-structured (feature-first folders under `lib/src/presentation/screens/<feature>/{controller,model,view}`), has ~478 active translation keys for English + Arabic, and exposes a solid merchant feature set (wallets, transactions, exchange, withdraw, invoices with PDF, QR codes, API access keys, 2FA, KYC). However it is **incomplete on every dimension required for the 5 target regions**: it is still branded **`qunzo`** everywhere (Dart package `qunzo_merchant`, Android `com.qunzo.merchant`, iOS `com.qunzo.merchant`, Firebase project `qunzo-b2252`, app label "Qunzo Merchant", splash screen even renders "unzo" due to a bug); only `en` and `ar` locales are supported and a `_normalizeLocale()` whitelist **silently forces every other locale to English**; the bundled font **Plus Jakarta Sans has no glyph coverage** for Arabic/Persian/CJK/Cyrillic; the **release build is signed with the debug keystore**; tokens, FCM token, **and the user's plain-text password** (for biometric re-login) are stored in plaintext `SharedPreferences`; **no certificate pinning, no ProGuard/R8, no flavors, no dark theme, no deep links/app links, no HMS/JPush fallback for China**. Most issues are tractable in days-to-weeks of engineering work, but P0 items (release signing, plain-text password, qunzo→ecardo rebrand including Firebase project rename) must be fixed before any production rollout.
+`ecardo_agentapp_v1` is a Flutter 3.35 / Dart 3.9 agent (cash-in / cash-out operator) app built on GetX (state + DI + routing) and Dio, with a single hard‑coded base URL `https://ecardo.ir/api`. It currently ships with only **English** and **Arabic** translations and a single Latin-only font family ("Plus Jakarta Sans"); the four additional target-region languages (`fa`, `zh`, `tr`, `ru`) are **completely missing**, and the existing Latin font will fail to render Persian / Arabic / Cyrillic / CJK glyphs cleanly. The codebase is **still branded "Qunzo Agent" end-to-end** — package name `com.qunzo.agent`, app label, Firebase project `qunzo-b2252`, splash screen text "unzo", 165 files importing `package:qunzo_agent/...` — only the API base URL has been switched to ecardo.ir. On the security side there are **two P0 blockers for a cash-handling app**: the release build is signed with the **debug keystore**, and the Bearer access token is stored in plaintext **`SharedPreferences`** (no `flutter_secure_storage`, no certificate pinning, no R8/ProGuard rules). Biometric is implemented only as a settings toggle, **not as a launch gate**. There are no flavors, no env separation, no deep links, no FCM alternative for China/Iran, and the GitHub Actions pipeline just builds an unsigned release APK with no tests.
 
 ---
 
 ## 1. App Identity & Branding Issues
 
-The app has **NOT been rebranded** from "qunzo" to "ecardo". Concrete leftover references:
+The rebrand from "Qunzo" → "ecardo" has effectively **not been performed** — only the API URL was changed.
 
-| Layer | File | Value |
-|---|---|---|
-| Dart package name | `pubspec.yaml` (line 1) | `name: qunzo_merchant` |
-| Dart imports | every single Dart file under `lib/` (~193 files) | `import 'package:qunzo_merchant/...'` |
-| Root widget class | `lib/src/app/app.dart` (lines 12–17, 26) | `class QunzoMerchant` / `runApp(const QunzoMerchant())` |
-| App label (Android) | `android/app/src/main/AndroidManifest.xml` (line 12) | `android:label="Qunzo Merchant"` |
-| App label (iOS) | `ios/Runner/Info.plist` (lines 21, 29) | `CFBundleDisplayName` / `CFBundleName` = `Qunzo Merchant` |
-| Static app name | `lib/src/app/constants/app_strings.dart` (line 3) | `static const appName = "Qunzo Merchant";` |
-| Android applicationId / namespace | `android/app/build.gradle.kts` (lines 9, 24) | `com.qunzo.merchant` |
-| Android Kotlin package | `android/app/src/main/kotlin/com/qunzo/merchant/MainActivity.kt` (line 1) | `package com.qunzo.merchant` |
-| iOS bundle ID | `ios/Runner.xcodeproj/project.pbxproj` (lines 505, 689, 713) + `ios/Runner/GoogleService-Info.plist` (line 12) | `com.qunzo.merchant` |
-| Firebase project ID | `lib/firebase_options.dart` (lines 45–55) + `android/app/google-services.json` + `ios/Runner/GoogleService-Info.plist` + `firebase.json` | `qunzo-b2252` |
-| Firebase Android API key | `lib/firebase_options.dart` (line 42) + `google-services.json` | `AIzaSyBDecN3TGV6vDJPRbswbOKvrJ9dt7VkZUE` |
-| Firebase iOS API key | `lib/firebase_options.dart` (line 50) + `GoogleService-Info.plist` | `AIzaSyDgFfu2VI5eHHsXsy_FlI0bXHy3-hzp6uo` |
-| `google-services.json` | contains clients for `com.qunzo.agent`, `com.qunzo.merchant`, `com.qunzo.user` | ⚠️ leftover clients for sibling apps |
+| Artifact | File | Current value | Required |
+|---|---|---|---|
+| Package name (Dart) | `pubspec.yaml:1` | `qunzo_agent` | `ecardo_agent` |
+| Android `applicationId` | `android/app/build.gradle.kts:9,24` | `com.qunzo.agent` | `com.ecardo.agent` (or `.agentapp`) |
+| Android namespace | `android/app/build.gradle.kts:9` | `com.qunzo.agent` | matching new id |
+| Android app label | `android/app/src/main/AndroidManifest.xml:12` | `Qunzo Agent` | `ecardo Agent` (or localized) |
+| Kotlin package | `android/app/src/main/kotlin/com/qunzo/agent/MainActivity.kt:1` | `package com.qunzo.agent` | must follow new applicationId (also rename folder) |
+| iOS bundle ID | `ios/Runner.xcodeproj/project.pbxproj:505,689,713` & `ios/Runner/Info.plist:25` | `com.qunzo.agent` (via `$(PRODUCT_BUNDLE_IDENTIFIER)`) | `com.ecardo.agent` |
+| iOS display name | `ios/Runner/Info.plist:21,29` (`CFBundleDisplayName`, `CFBundleName`) | `Qunzo Agent` | `ecardo Agent` |
+| App name constant | `lib/src/app/constants/app_strings.dart:3` | `"Qunzo Agent"` | `"ecardo Agent"` |
+| Root widget / main | `lib/main.dart:26`, `lib/src/app/app.dart:12-16` | `class QunzoAgent` | rename to `EcardoAgent` |
+| Splash wordmark | `lib/src/presentation/screens/authentication/splash/view/splash_screen.dart:210` | hardcoded `"unzo"` (paired with `app_screen_icon.png` showing "Q") | replace with "ecardo" or new logo asset |
+| Firebase project | `lib/firebase_options.dart:44,52`, `firebase.json`, `android/app/google-services.json:5`, `ios/Runner/GoogleService-Info.plist:14` | `qunzo-b2252` (and `com.qunzo.agent` client) | new ecardo Firebase project |
+| Firebase API keys | `lib/firebase_options.dart:41,49` | `AIzaSyBDecN3…` / `AIzaSyDgFfu…` (committed, public Google API key) | rotate, move to `--dart-define`, or remote config |
+| `google-services.json` clients | `android/app/google-services.json:14,32` | both `com.qunzo.agent` AND `com.qunzo.user` (sibling user app) present | regenerate for new ecardo project, drop `qunzo.user` client |
+| 165 Dart files | everywhere | `import 'package:qunzo_agent/...'` | bulk-rewrite to `package:ecardo_agent/...` (use `change_app_package_name` which is already in `pubspec.yaml:38`) |
+| Logo assets | `assets/logos/app_icon.png`, `app_logo.png`, `app_screen_icon.png` | likely still Qunzo logo | replace |
 
-**Splash-screen rendering bug:** `lib/src/presentation/screens/auth/splash/view/splash_screen.dart` line 205 hard-codes `Text("unzo")` (missing the "Q"). Combined with `app_screen_icon.png` on the left, the user sees `<icon> unzo` instead of `<icon> Qunzo` or `<icon> ecardo`.
-
-**Action required (P0):**
-1. Rename Dart package via `change_app_package_name` (already a dev tool dep) or `pubspec.yaml` rename + `dart pub get` + IDE refactor of all imports.
-2. Update Android `applicationId`/`namespace`, Kotlin package dir, iOS `PRODUCT_BUNDLE_IDENTIFIER`, `CFBundleDisplayName`/`CFBundleName`, `AppStrings.appName`, AndroidManifest `android:label`, splash "unzo" → "ecardo".
-3. Create a **new** Firebase project (`ecardo-merchant` or similar) and re-run `flutterfire configure`; replace `firebase_options.dart`, `google-services.json`, `GoogleService-Info.plist`. The current Firebase project name `qunzo-b2252` is shared with `qunzo.agent` and `qunzo.user` clients — that is a leak across the three apps and must not ship.
-4. Replace launcher icons (`assets/logos/app_icon.png` is the source for `flutter_launcher_icons`) and in-app logos (`app_icon.png`, `app_logo.png`, `app_screen_icon.png`).
-5. Audit Lottie/JSON, splash frame PNG, home header frame PNG, profile frame PNG, withdraw success frame/shape, etc. — they likely contain "Qunzo" baked into the artwork.
+**Only "ecardo" string in entire repo** is the single line `lib/src/network/api/api_path.dart:3 → baseUrl = 'https://ecardo.ir/api'`. Nothing else has been rebranded.
 
 ---
 
 ## 2. Localization Status
 
-### 2.1 Existing ARB files (`lib/l10n/`)
+### Existing languages
+- `lib/l10n/app_en.arb` (693 lines, template)
+- `lib/l10n/app_ar.arb` (693 lines, mirror of en)
+- `lib/l10n/app_localizations.dart` + `app_localizations_en.dart` (1964 lines) + `app_localizations_ar.dart` (1959 lines) — generated by `flutter gen-l10n` (config in `l10n.yaml`).
 
-| File | Lines | Active keys (excluding `comment_*`) | Total entries |
-|---|---|---|---|
-| `app_en.arb` | 650 | **478** | 560 (incl. 82 `comment_*` placeholders) |
-| `app_ar.arb` | 650 | **478** | 560 |
+### ARB key counts
+- Total keys matching `^\s*"[a-zA-Z][a-zA-Z0-9_]*":` = **598**
+- Of these, **93** are `comment_*` section headers (no actual translation)
+- Real translation strings = **~505** (incl. `@@locale`)
 
-- `l10n.yaml` is correctly configured (`arb-dir: lib/l10n`, `template-arb-file: app_en.arb`, `output-localization-file: app_localizations.dart`).
-- Generated files exist: `app_localizations.dart` (3,534 lines), `app_localizations_en.dart` (1,835 lines), `app_localizations_ar.dart` (1,822 lines). Generation was performed; nothing is out of date.
-- No `app_fa.arb`, `app_zh.arb`, `app_tr.arb`, `app_ru.arb` exist.
-
-### 2.2 supportedLocales list
-
-`lib/src/app/app.dart` line 79:
+### supportedLocales (lib/src/app/app.dart:62)
 ```dart
 supportedLocales: const [Locale('en'), Locale('ar')],
 ```
-`lib/l10n/app_localizations.dart` lines 96–99 (generated):
-```dart
-static const List<Locale> supportedLocales = <Locale>[
-  Locale('ar'),
-  Locale('en'),
-];
-```
+**Hard-coded to 2 locales.** Adding `fa`, `zh`, `tr`, `ru` requires:
+1. New ARB files: `app_fa.arb`, `app_zh.arb` (consider `zh_Hans` + `zh_Hant`), `app_tr.arb`, `app_ru.arb`
+2. Update `supportedLocales` in `app.dart`
+3. Update language picker UI in `settings_screen.dart` (see below)
+4. Update `changeLanguage()` switch in `home_controller.dart`
 
-### 2.3 The `_normalizeLocale` whitelist bug (P0 for non-EN/AR users)
+### Language picker UI — hardcoded to 2 options
+- `lib/src/presentation/screens/settings/view/settings_screen.dart:159-164`:
+  ```dart
+  selectedValue: ["English", "Arabic"],
+  dropdownItems: ["English", "Arabic"],
+  ```
+- `lib/src/presentation/screens/home/controller/home_controller.dart:62-103` — `_setInitialLanguage()` and `changeLanguage()` only know `"English"` and `"Arabic"`, falling back to `"en"` for anything else.
 
-`lib/src/app/app.dart` lines 22–33:
-```dart
-Locale _normalizeLocale(String? localeCode) {
-  if (localeCode == null || localeCode.isEmpty) return const Locale('en');
-  final normalizedCode = localeCode
-      .replaceAll('-', '_')
-      .split('_')
-      .first
-      .toLowerCase();
-  if (normalizedCode == 'ar') return const Locale('ar');
-  return const Locale('en');   // ← everything else silently falls back to English
-}
-```
+### Server-controlled language switcher
+- `home_controller.dart:50` reads `SettingsService.getSetting("language_switcher") == "1"` from the `/get-settings` API to decide whether to even show the language option.
+- The settings API only returns a **flag** (`"1"` / `"0"`), **not** the list of available languages. There is no API endpoint that returns languages dynamically — the available locales are baked into the client.
 
-This is wired into **both** `localeResolutionCallback` (line 70) and the saved-locale loader (line 48). Net effect: **on first launch on a Persian / Chinese / Turkish / Russian device the app forces English**, and even if the backend returns `language_switcher=1`, the in-app picker (profile_screen.dart lines 179–182) only offers `["English", "Arabic"]` — there is no way for a user to pick fa/zh/tr/ru.
+### Sample translation key coverage (first 30 keys)
+`maintenanceTitle`, `maintenanceSubtitle`, `commonAlertConfirmButton`, `commonAlertCancelButton`, `commonAlertExitTitle`, `commonAlertExitMessage`, `imagePickerDropdownTitle`, `imagePickerDropdownCamera`, `imagePickerDropdownGallery`, `countryDropdownSearchHint`, `countryDropdownNotFound`, `allControllerLoadError`, `splashAgentBadge`, `agentNavigationBottomNavHome`, `agentNavigationBottomNavWallets`, `agentNavigationBottomNavTransactions`, `agentNavigationBottomNavSettings`, `agentNavigationQrInvalidFormat`, `imagePickerGalleryError`, `imagePickerCameraError`, `biometricDeviceNotSupported`, `biometricNotEnrolled`, `biometricUnavailable`, `biometricAuthenticationFailed`, `biometricCheckFailed`, `biometricAuthReason`, `networkErrorGeneric`, `networkErrorTimeout`, `networkErrorNoInternet`, `networkErrorUnauthorized`. Coverage spans maintenance, alerts, image picker, country dropdown, splash, navigation, biometrics, network errors, plus per-screen sections for add_money, auth, cash_in, exchange, home, wallets, withdraw, transactions, profit_history, qr, support, settings, kyc, notifications, two_fa. **No calendar/date-format-related keys** (because dates are formatted in code with hard-coded patterns, see §7).
 
-The `HomeController.changeLanguage()` (home_controller.dart lines 84–106) also hard-codes only the `English`/`Arabic` branches; everything else defaults to `en`.
+### RTL handling
+- `Directionality.of(context)` / `TextDirection.rtl` is checked in **13 files** (splash, settings, profile_settings, wallets_screen, wallet_details, home_wallets_section, all_menus_section, home_header_section, support_ticket_screen, image_picker_dropdown_bottom_sheet, common_app_bar, submit_valid_id_verification).
+- Two inconsistent idioms are used:
+  - `Directionality.of(context) == TextDirection.rtl` (in `settings_screen.dart`, `home_wallets_section.dart`, `all_menus_section.dart`, `home_header_section.dart`, `splash_screen.dart`, `submit_valid_id_verification.dart`)
+  - `Directionality.of(context).name == 'rtl'` (in `image_picker_dropdown_bottom_sheet.dart`, `common_app_bar.dart`, `support_ticket_screen.dart`, `profile_settings.dart`, `wallets_screen.dart`, `wallet_details.dart`) — relies on Dart enum `.name` (Dart 2.15+), works but is uglier.
+- The home wallet carousel uses `PageView.builder(reverse: isRtl, …)` — correct.
+- Arrow icons are flipped with `Transform.flip(flipX: isRtl)` — correct.
+- **4 dedicated RTL wallet card images exist**: `assets/images/wallets_card/rtl_wallet_one.png … rtl_wallet_four.png` (referenced from `png_assets.dart:132-137` and switched via `isRtl ? rtlWalletImages : ltrWalletImages` in `home_wallets_section.dart:42` and `wallets_screen.dart:64`). This is the only place where the app localizes a binary asset for RTL. **No equivalent CJK or vertical-layout assets exist** (Chinese users will be served LTR layouts only).
 
-### 2.4 Dynamic language loading via API
+### Dynamic language loading via API
+**No.** The only language-related server payload is the `language_switcher` boolean; the list of selectable languages is hard-coded in `settings_screen.dart`.
 
-- `SettingsService.fetchSettings()` (settings_service.dart lines 146–170) calls `GET /get-settings` and stores a flat `RxMap<String,String> appSettings`. The keys observed in use:
-  - `language_switcher` (gates the UI picker in `profile_screen.dart` and `home_controller.dart`)
-  - `email_verification`, `fa_verification`, `referral_bonus`, `site_currency`, `site_currency_decimals`
-- There is **no endpoint that returns a list of supported languages or remote ARB translations**. The set of available languages is hard-coded to `en`/`ar`. Even if backend `language_switcher=1` is enabled, the front-end can only show two languages. Any additional language requires a new app build.
-
-### 2.5 RTL handling
-
-Sparse but present. Only 6 files explicitly handle RTL:
-- `lib/src/app/navigation/navigation_screen.dart` (line 43, 87)
-- `lib/src/common/widgets/app_bar/common_app_bar.dart` (lines 30, 55 — `flipX: isRtl` on icons)
-- `lib/src/common/widgets/dropdown_bottom_sheet/image_picker_dropdown_bottom_sheet.dart`
-- `lib/src/presentation/screens/profile/view/profile_screen.dart` (line 56, 220)
-- `lib/src/presentation/screens/profile_settings/view/profile_settings_screen.dart` (line 282, 358)
-- OTP fields in `forgot_password_pin_verification.dart` (line 113) and `verify_email_screen.dart` (line 136) force `TextDirection.ltr` (correct for digits).
-
-The codebase relies on Flutter's `Directionality` propagation (which works for `Locale('ar')` → RTL), but no widget-level tests verify Arabic layout. Many screen layouts use `Row` with hard-coded `EdgeInsetsDirectional` so they will mirror correctly — but several use plain `EdgeInsets.symmetric(horizontal: ...)` and `Row(children: [icon, text])` without `Directionality` awareness, which will cause visual glitches when more RTL languages (Persian, Urdu, Hebrew) are added.
-
-### 2.6 iOS Info.plist localization gap
-
-`ios/Runner/Info.plist` has **no `CFBundleLocalizations`** key. Without it, iOS does not know the app supports Arabic — App Store metadata and per-language system prompts will not be available. Also `CFBundleDevelopmentRegion` is `$(DEVELOPMENT_LANGUAGE)` (Xcode default = `en`).
-
-### 2.7 Sample 30 translation keys (coverage map)
-
-Maintenance, splash, navigation, image_picker, biometric_auth, network_service, api_access_key, forgot_password, reset_password, pin_verification, login, two_factor_auth, auth_id_verification, email screen, personal_info, set_up_password, sign_up_status, verify_email, welcome, change_password, exchange (controller + screen + amount/review/success sections), home (controller, drawer, header, navigator, transactions, wallets, transaction_details, settings_bottom_sheet), kyc (details, history, id_verification), create_invoice (controller, screen, add_item, information, pdf), update_invoice (screen, add_item, information), invoice_details, invoice_screen, notification, profile, profile_settings, qr_code, add_new_ticket, replay_ticket, support_ticket, transaction_filter, transactions_screen, two_fa_authentication (disable/enable/generate_qr), create_new_wallet, delete_wallet, wallet_details, wallets_screen, create_withdraw_account (controller, screen), edit_withdraw_account, withdraw (controller, screen, account_filter, account_section, amount_step, review_step, success_step, toggle_section, delete_account_dropdown), dynamic_attachment_preview, no_internet_connection, web_view.
-
-Coverage is broad for **merchant UX strings** but **absent** for:
-- Anything that would be specific to a region (no strings for "Jalali date picker", "Persian digits", "Iranian Sheba/IBAN", "WeChat Pay", "Alipay", "YooMoney", "Mir", "iyzico", "PayTabs", "Network International", "HMS Push", "JPush", etc.).
-- Many API error messages from the server are shown verbatim via `ToastHelper().showErrorToast(errorMessages)` in `network_service.dart` — those are NOT localized through ARB; they need a translation layer on either backend or client.
+### Missing for target regions
+| Region | Locale | ARB file | RTL? | Jalali/Hijri? | Persian/Cyrillic/CJK font? | Status |
+|---|---|---|---|---|---|---|
+| Iran | `fa` | **missing** | yes (RTL) | needs Jalali | needs Persian font (e.g. Vazirmatn) | not started |
+| China | `zh` (`zh_Hans`) | **missing** | no | Gregorian OK | needs CJK font (Noto Sans SC) | not started |
+| Turkey | `tr` | **missing** | no | Gregorian OK | Latin OK (Plus Jakarta works) | not started |
+| Russia | `ru` | **missing** | no | Gregorian OK | needs Cyrillic font (Plus Jakarta Sans **does** include Cyrillic in the variable font, but verify) | not started |
+| UAE | `ar` (existing) | present | yes (RTL) | optional Hijri | still needs Arabic font (see §3) | partial (no Arabic font shipped) |
 
 ---
 
 ## 3. Fonts & Typography
 
-### 3.1 Bundled fonts (`assets/fonts/`)
+### Bundled fonts (`pubspec.yaml:81-92`)
+Single family only:
+- `Plus Jakarta Sans` — 5 weights: Variable (default), Medium (500), SemiBold (600), Bold (700), ExtraBold (900)
 
-Five weights of **Plus Jakarta Sans** only:
-- `PlusJakartaSans-VariableFont_wght.ttf`
-- `PlusJakartaSans-Medium.ttf` (weight 500)
-- `PlusJakartaSans-SemiBold.ttf` (weight 600)
-- `PlusJakartaSans-Bold.ttf` (weight 700)
-- `PlusJakartaSans-ExtraBold.ttf` (weight 900)
+### Usage
+- `lib/src/app/config/theme/light_theme.dart:8` → `fontFamily: "Plus Jakarta Sans"`
+- All `TextStyle` constructors throughout the app rely on this default (no per-widget `fontFamily` overrides were found in spot checks).
 
-### 3.2 Theme binding
+### Coverage gaps
+- **Plus Jakarta Sans is a Latin/Greek/Cyrillic-ext font** — it does **NOT** include the Arabic or Perso-Arabic block, nor CJK ideographs. Today's Arabic UI therefore falls back to the system font (RenderBox ▯ tofu on some devices; inconsistent metrics on iOS).
+- For the 5 target regions you need at minimum:
+  - **fa**: Vazirmatn (or IRANSans / Sahel) — required
+  - **ar**: Noto Naskh Arabic or Cairo (in addition to Vazirmatn, since fa/ar glyphs differ in `ي/ك` shapes) — required
+  - **zh**: Noto Sans SC (Simplified) + Noto Sans TC (Traditional) — required
+  - **tr**: Plus Jakarta Sans is fine (Latin + `İ ı ğ ş ç`)
+  - **ru**: Plus Jakarta Sans variable **does** include Cyrillic; verify subset shipped to device.
+- **Recommended approach**: declare a `fontFamilyFallback` list (Flutter 3.16+) per locale via `ThemeData.textTheme`, or load locale-specific `fontFamily` in a `LocaleAwareThemeProvider`. Bundle the additional fonts (subset to ≤200 KB each) or use `google_fonts` with a pre-bundled cache to avoid first-launch network jank.
 
-`lib/src/app/config/theme/light_thtme.dart` (note the filename typo **"light_thtme.dart"**):
-```dart
-ThemeData lightTheme(context) => ThemeData(
-  brightness: Brightness.light,
-  scaffoldBackgroundColor: AppColors.lightBackground,
-  fontFamily: "Plus Jakarta Sans",
-);
-```
-No `ThemeData.darkTheme`, no `theme:` per-route overrides. The `fontFamily` is set globally — every `Text()` widget inherits "Plus Jakarta Sans".
-
-### 3.3 Glyph-coverage gaps (CRITICAL for 5-region launch)
-
-Plus Jakarta Sans is a Latin-only family. It has **no glyphs for**:
-- **Arabic** (`ar`) — currently shipping, will render as `.notdef` tofu boxes (no Arabic glyphs!)
-- **Persian** (`fa`) — same as Arabic plus extra Persian letters (پ چ ژ گ ک ی)
-- **Chinese** (`zh`) — CJK ideographs not present
-- **Russian** (`ru`) — Cyrillic not present (Plus Jakarta Sans actually has limited Cyrillic; verify before relying on it)
-- **Turkish** (`tr`) — Latin with dotted/undotted i; generally OK with Plus Jakarta Sans but verify glyph ı/İ.
-
-The current ARB file `app_ar.arb` **already has full Arabic text** but the bundled font will render it as tofu or fall back to a system font. This is a P0 — the Arabic translation is shipping but currently broken on some Android devices and unstyled on iOS.
-
-### 3.4 PDF font
-
-`lib/src/presentation/screens/invoice/view/invoice_details/sub_sections/invoice_pdf.dart` uses `pw.Document()` from the `pdf` package with **no `Theme(defaultTextStyle: ...)` and no `pw.Font.ttf(...)` registered**. The `pdf` package falls back to Helvetica (WinAnsi). Consequence: **any invoice PDF generated on a device in Arabic (or future fa/zh/ru) will render localized text as blank/tofu boxes**. This must be fixed before any non-English merchant can use invoice printing.
-
-### 3.5 Recommended font stack
-
-| Region | Font | License |
-|---|---|---|
-| Latin (en/tr) | Plus Jakarta Sans (already bundled) | SIL OFL |
-| Arabic (ar) | Noto Sans Arabic or IBM Plex Sans Arabic | SIL OFL |
-| Persian (fa) | **Vazirmatn** (preferred for Iran) or Noto Naskh Arabic | SIL OFL / OFL |
-| Chinese (zh) | **Noto Sans SC** (Simplified) + Noto Sans TC (Traditional) | SIL OFL |
-| Russian (ru) | Plus Jakarta Sans actually has Cyrillic in newer releases; otherwise Noto Sans | SIL OFL |
-| Turkish (tr) | Plus Jakarta Sans (OK) | — |
-
-For the PDF generator: register `pw.Font.ttf(ByteData)` for each script and switch fonts based on the invoice locale.
+### RTL wallet card images (already present — investigate)
+- `assets/images/wallets_card/rtl_wallet_one.png … rtl_wallet_four.png` exist and are switched in `home_wallets_section.dart:42` and `wallets_screen.dart:64`. This pattern should be **extended to `fa`** (which is RTL like `ar`).
+- `wallet_details.dart:84-96` maps LTR images to detail-card variants but **also accepts RTL equivalents** in the equality check — good.
 
 ---
 
-## 4. Theme
+## 4. Theme & Colors
 
-- Single theme file: `lib/src/app/config/theme/light_thtme.dart` (10 lines). **Filename has a typo** ("thtme") that has propagated into `app.dart` line 6 — fix on rename.
-- **No dark theme** even though `assets/icons/png/common/dark_moon_common_icon.png` and `dark_moon_common_icon.png` exist (suggesting dark mode was once planned). `app.dart` line 64 hard-codes `themeMode: ThemeMode.light`.
-- Palette (`lib/src/app/constants/app_colors.dart`): `lightBackground=#F8F8F8`, `lightPrimary=#4CD080` (the brand green), text colors, plus `error/warning/success/white/black/transparent`. That's it — no secondary/tertiary, no surface variants, no semantic colors for transaction types. Transaction colors are hardcoded per-widget (`transactions_dynamic_color.dart`, `notification_dynamic_color.dart`).
-- `android/app/src/main/res/values-night/styles.xml` exists (so the Android launch screen respects dark mode) but the Flutter app itself ignores `ThemeMode.dark` — visually jarring handoff.
-- No `ThemeController` / no `Get.isDarkMode` / no `GetX` `ThemeService`. Adding dark mode would require (a) writing `dark_theme.dart`, (b) exposing a `ThemeController` Rx<ThemeMode>, (c) wiring it into `GetMaterialApp`, (d) updating every widget that reads `AppColors.lightXxx` directly (most of them).
+### `lib/src/app/config/theme/light_theme.dart` (full file, 11 lines)
+```dart
+class LightTheme {
+  ThemeData lightTheme(context) => ThemeData(
+    brightness: Brightness.light,
+    scaffoldBackgroundColor: AppColors.lightBackground,
+    fontFamily: "Plus Jakarta Sans",
+  );
+}
+```
+- This is **the entire theme**. No `TextTheme`, no `ColorScheme`, no component themes — every widget builds its own `TextStyle(letterSpacing: 0, fontWeight: FontWeight.w900, …)` inline (see `home_screen.dart:88-92`, `settings_screen.dart:179-186`, `home_wallets_section.dart:98-105`). This makes global restyling painful.
+- `app.dart:51` hard-codes `themeMode: ThemeMode.light` — there is **no dark theme** despite the asset catalog containing `moon_common_icon.png` and `dark_moon_common_icon.png`, suggesting dark mode was once planned.
+
+### Dark theme
+- **No `dark_theme.dart` file exists.** A glob of `lib/src/app/config/theme/` returns only `light_theme.dart`.
+
+### Color palette (`lib/src/app/constants/app_colors.dart`)
+- `lightBackground = 0xFFFFFFFF`
+- `lightPrimary = 0xFFAA60C8` (purple)
+- `lightTextPrimary = 0xFF0C0310`, `lightTextTertiary = 0xFF0C0310 @ 60%`
+- `error = 0xFFDC3C22`, `warning = 0xFFFFAA00`, `success = 0xFF14AE6F`, `info = 0xFF41B1FC`
+- All colors are "light" prefixed; no dark variants. No brand gradient. No semantic colors per transaction type — `transactions_dynamic_color.dart` widget handles that ad-hoc.
+
+### Theme controller / theme switcher
+- **None.** `SettingsService` persists biometric, email, locale, password (yes — see §10) but **not** a theme mode. No `ThemeController`, no `Get.isDarkMode` checks anywhere.
 
 ---
 
 ## 5. Network Layer
 
-### 5.1 `lib/src/network/service/network_service.dart` (Dio)
+### `lib/src/network/service/network_service.dart` (520 lines, Dio)
+- Two `Dio` instances: `_dio` (secured, with Bearer interceptor) and `_globalDio` (no auth, used for `/get-settings`, `/get-countries`, `/convert`, etc.).
+- Base URL: `ApiPath.baseUrl` → `https://ecardo.ir/api` (hard-coded, no env switching).
 
-- Two Dio instances: `_dio` (secured, adds Bearer token) and `_globalDio` (no auth, for public endpoints like `/get-settings`, `/get-countries`, `/get-register-fields/merchant`).
-- `baseUrl` = `https://ecardo.ir/api` (hard-coded in `ApiPath.baseUrl`, `lib/src/network/api/api_path.dart` line 4). **Single environment — no dev/staging/prod switch.**
-- **No `connectTimeout` / `receiveTimeout` / `sendTimeout` set.** Dio defaults are `0` (infinite) for connect/receive, which means a hung server can freeze the app forever. The error handler at line 320–325 catches `DioExceptionType.connectionTimeout` and `receiveTimeout` but those will never fire with current config.
-- **No certificate pinning.** No `IOHttpClientAdapter`/`SecurityContext`/`BadCertificateCallback` override either — Dio uses the system trust store, which is fine for normal TLS but offers no MITM protection. For a fintech app this is a P1.
-- **No retry interceptor.** A single failed request is final.
-- **No cache interceptor** (no `dio_cache_interceptor` package).
-- **Logging interceptor is hand-rolled** — `_log()` writes via `debugPrint` gated by `kDebugMode`. Acceptable, but no structured logging, no Sentry/Crashlytics integration, no request ID.
-- **Auth interceptor** (lines 60–80): adds `Authorization: Bearer <token>` if present. On 401 it just logs "Unauthorized. Please login again." — the actual redirect-to-login logic is in `_handleDioErrorResponse` (case 401, lines 372–447) which pops up a dialog and routes to `BaseRoute.login`. There is **no token refresh** mechanism; once a token expires the user is forced to log in again. For a merchant app that's borderline acceptable but annoying.
-- The `login()` method (lines 85–123) **clears the interceptor list** (`_dio.interceptors.clear()`) before the call and re-adds them after — this is to avoid sending the old Bearer token during login. It works but is fragile: any concurrent request fired during the login window will also lose its interceptor.
-- Error responses: server `message` string from JSON is passed verbatim to `ToastHelper().showErrorToast()`. Not localized client-side.
+### Interceptors (`_setupInterceptors`, lines 58-80)
+- **Auth interceptor**: adds `Authorization: Bearer <token>` from `TokenService`.
+- **Error interceptor**: 401 just logs "Unauthorized. Please login again." — the actual 401 dialog & redirect lives in `_handleDioErrorResponse` (lines 398-473) and routes the user to `BaseRoute.signIn`.
 
-### 5.2 `lib/src/network/service/token_service.dart`
+### What is **MISSING**
+- ❌ **Certificate pinning** — no ` Dio.httpClientAdapter` / `IOHttpClientAdapter` / `sslPinningInterceptor`. A cash-handling agent app over plain HTTPS is exposed to MITM on rooted devices / hostile Wi-Fi.
+- ❌ **Retry interceptor** — no `Dio RetryInterceptor` / `RetryOptions`. A single transient 5xx kills the request.
+- ❌ **Cache interceptor** — no `DioCacheInterceptor`. Settings/countries/transaction-types are re-fetched on every cold start.
+- ❌ **Logging interceptor** — uses a custom `_log()` gated by `kDebugMode`. Fine for dev, but no structured remote logging (Sentry / Firebase Crashlytics not in `pubspec.yaml`).
+- ❌ **Timeout configuration** — no `connectTimeout` / `receiveTimeout` / `sendTimeout` set; Dio defaults apply (which vary across versions, typically infinite or 0 = no timeout). The code manually detects timeouts in `_handleDioException` (line 346) but **they will essentially never fire** because no timeout is configured.
 
-- Uses `shared_preferences` — **plain text on disk**, readable via `adb shell run-as` on debuggable builds, or via backup extraction. For fintech this is a **P0**; should be `flutter_secure_storage` (Keystore on Android, Keychain on iOS).
-- Only stores `access_token`. No refresh token, no expiry, no scope.
+### Token storage (`lib/src/network/service/token_service.dart`, 32 lines)
+- `shared_preferences` — **plaintext**, Android XML at `/data/data/<pkg>/shared_prefs/`.
+- On a rooted device or via `adb run-as` on debuggable builds, the access token is trivially readable.
+- See §10 for security implications.
 
-### 5.3 Base URL / environments
+### Response wrapper (`api_response.dart`)
+- Standard `Status.loading / completed / error` enum + `ApiResponse<T>` factory. **No `data` JSON parsing** at this layer — each controller does `Model.fromJson(response.data!)` ad-hoc. No global JSON error contract enforcement.
 
-| Setting | Value |
-|---|---|
-| `baseUrl` | `https://ecardo.ir/api` (production) |
-| Dev/staging/prod switch | ❌ none |
-| Flavors | ❌ none |
-| `--dart-define` usage | ❌ none |
+### Environment separation
+- **None.** Single `baseUrl` in `api_path.dart:3`. No `--flavors`, no `--dart-define=BASE_URL=…`, no `.env` file. Dev/staging/prod all hit `ecardo.ir/api`.
 
-Hard-coded prod URL means every developer and CI build hits production.
+### `ApiPath` inventory (109 lines)
+Endpoints cover: countries, settings, agent profile, terms, FCM setup, transaction types/statuses, currency converter (one-currency and currency-to-currency), auth (login, register, forgot-password, reset-verify-otp, reset-password, send/validate verify-email, 2fa verify, personal-info-update, kyc-rejected), dashboard, wallets, currencies, add-money (gateway methods + post), cash-in (config, post, history), withdraw (accounts, methods, create, post, history), transactions, profit-history (same `/agent/transactions` with `type=agent-profit`), QR code, support ticket, profile settings, change-password, notifications (mark-as-read, get), 2FA (generate/enable/disable), KYC (submit + history), exchange (config, post, history).
 
-### 5.4 Endpoints (`lib/src/network/api/api_path.dart`)
-
-Complete API surface (good documentation):
-- Settings, countries, profile, terms, FCM setup, currency converter
-- Auth: `/auth/merchant/{login,register,forgot-password,reset-verify-otp,reset-password,2fa/verify,logout,send-verify-email,validate-verify-email,personal-info-update}`
-- Registration fields: `/get-register-fields/merchant`, KYC rejected-data: `/merchant/kyc/rejected-data`
-- Wallets: `/merchant/wallets`, currencies: `/get-currencies`
-- Transactions: `/merchant/transactions`
-- Notifications: `/get-notifications`, `/mark-as-read-notification`
-- QR: `/merchant/qrcode`
-- API access keys: `/merchant/access-keys`, `/merchant/access-keys/regenerate`
-- Change password, profile update, support tickets, withdraw (+ methods), KYC (+ history), 2FA (generate/enable/disable), exchange (config/wallet/history), invoices.
+Notable: `cashOutHistoryEndpoint = '/agent/cashin/history'` and `cashInHistoryEndpoint = '/agent/cashin/history'` are **the same string** — likely a copy-paste bug; the API may need a separate `/agent/cashout/history` route.
 
 ---
 
 ## 6. State Management & Architecture
 
-### 6.1 Pattern
+### Pattern
+- **GetX** (`get: ^4.7.2`) for: state management (`.obs`, `Obx`), dependency injection (`Get.put`, `Get.lazyPut`, `Get.find`), routing (`GetMaterialApp`, `Get.toNamed`, `Get.offAllNamed`), internationalization (`Get.updateLocale`), and bottom sheets/dialogs (`Get.bottomSheet`, `Get.dialog`).
+- Layered structure:
+  ```
+  lib/src/
+    app/{bindings,config/theme,constants,navigation,routes}      ← app shell
+    common/{controller,model,service,widgets}                    ← shared kernel
+    network/{api,response,service}                               ← Dio + token
+    presentation/{screens,widgets}                               ← feature modules
+    helper/                                                      ← dynamic_decimals, mask_email, toast
+  ```
+- Each feature follows `view/` + `controller/` + (optional) `model/` + (optional) `sub_sections/`. Bindings are centralized in `lib/src/app/bindings/app_bindings.dart` (36 binding classes, all `Get.lazyPut`).
 
-- **GetX 4.7.2** is used uniformly for: state (`.obs`/`Rx`/`Obx`), dependency injection (`Get.put`, `Get.lazyPut`, `Get.find`), routing (`GetMaterialApp`, `Get.toNamed`, `Get.offAllNamed`), and i18n (`Get.updateLocale`, `Get.deviceLocale`).
-- Bindings: `lib/src/app/bindings/app_bindings.dart` (~314 lines, one Binding class per feature) + `lib/src/app/bindings/initial_binding.dart` (registers `TokenService`, `SettingsService`, `NetworkService` at app start). Note: `InitialBinding` is defined but **never wired** into `GetMaterialApp.initialBinding` (see `app.dart` line 61 — no `initialBinding:` argument). Instead, `main.dart` line 29–39 manually `Get.put`s the same services. Functionally equivalent but redundant.
-- Folder convention: `lib/src/presentation/screens/<feature>/{controller,model,view}` — strictly enforced. 76 view files (incl. sub_sections), 37 controllers, 17 models under `screens/`. Plus 5 common controllers, 5 common models, 4 common services, 14 common widgets, 10 presentation widgets.
-- Routes: `routes.dart` (string constants), `routes_config.dart` (widget factory), `routes_handler.dart` (GetPage → binding wiring). 33 distinct routes + 2 system routes (noInternet, maintenance).
-- Routing inconsistency: `BaseRoute.idVerification` is registered **twice** in `routes_handler.dart` (lines 107–111 and 177–181) — second registration silently overrides the first. Not a bug today (same binding) but a code smell.
+### Sample screen — `home_screen.dart`
+- `StatefulWidget` (because of `PopScope` + `initState`); pulls `HomeController` via `Get.find`.
+- Body wrapped in `Obx` → if loading shows `HomeSkeletonLoader()` (shimmer), else `RefreshIndicator` → `SingleChildScrollView` with sub-section widgets.
+- Uses `AppLocalizations.of(context)!` for i18n. RTL not directly handled here (handled inside sub-sections).
 
-### 6.2 Sample: `home_controller.dart`
+### Sample controller — `home_controller.dart` (256 lines)
+- Mixes concerns: dashboard fetch, biometric toggle, language switching, logout, opening Android security settings via `android_intent_plus`. This controller is doing too much; should be split.
+- `language` RxString stores "English" / "Arabic" as user-facing label, then `changeLanguage()` maps label→locale code in a switch with a hard-coded `else → "en"` fallback — i.e. adding new languages requires code changes here.
+- `_setInitialLanguage()` calls `Get.find<SettingsService>().getSetting("language_switcher")` — so language initial state is gated by server-side flag.
+- `_openSecuritySettings()` uses `AndroidIntent(action: 'android.settings.SECURITY_SETTINGS')` — on iOS it only shows a toast saying "set up biometric in Settings" without deep-linking to `UIApplicationOpenSettingsURLString`.
 
-`HomeController` (268 lines) is the main post-login controller. It:
-- Holds `walletsModel`, `transactionsModel`, `language`, `isBiometricEnable`, `selectedIndex`, `selectedDrawerIndex`, `currentWalletIndex`.
-- Calls `loadData()` on init which (1) reads `language_switcher` setting, (2) sets initial language, (3) fetches user profile, (4) fetches wallets, (5) fetches transactions.
-- `changeLanguage(String)` only knows "English" and "Arabic" — adding `fa/zh/tr/ru` requires editing this method (and the picker in `profile_screen.dart`).
-- Uses `WidgetsBinding.instance.addPostFrameCallback` for navigation in error handlers (correct pattern).
-
-### 6.3 Sample: `qr_code_screen.dart`
-
-The QR screen renders an SVG returned by the API (`/merchant/qrcode`) via `SvgPicture.string(controller.qrCodeModel.value.data)`. Downloading the QR uses `Permission.manageExternalStorage.request()` and writes to `/storage/emulated/0/Download/qr_code_<ts>.png` — this is the **deprecated MANAGE_EXTERNAL_STORAGE** permission, which Google Play restricts to file managers / antivirus apps. The merchant app will likely **fail Play Store review** or require a policy exception. Use the MediaStore API via `path_provider` + `saf_util` or the `gal` package.
-
-### 6.4 Sample: `api_access_key_controller.dart`
-
-Straightforward: GET `/merchant/access-keys`, POST `/merchant/access-keys/regenerate`. Public + secret keys displayed in read-only TextFields with copy buttons. **Issue:** keys are displayed in plain text with no reveal/hide toggle and no copy-to-clipboard audit log. A shoulder-surfer can read the secret key.
+### Routes
+- `routes.dart`: 35 named routes in `BaseRoute`.
+- `routes_handler.dart`: 31 `GetPage` entries with bindings.
+- `routes_config.dart`: static `const` widget instances — `static const splash = SplashScreen();` etc. **Note**: using `const` for screen constructors is fine, but using `static const` for the widget itself (rather than a builder) means **the same Element instance is reused across navigations** which can cause stale state on revisit. This is a latent bug if any screen relies on `initState` re-running after `Get.offNamed` round-trips.
+- `initial_bindings.dart` is dead code (not referenced in `main.dart` or `app.dart`); actual services are wired in `main.dart:_initializeServices()`.
 
 ---
 
 ## 7. Date/Time, Currency, Number Formatting
 
-### 7.1 `intl` package usage
+### `intl` usage (5 import sites, all `DateFormat` only)
+| File | Pattern | Locale-aware? |
+|---|---|---|
+| `lib/src/common/widgets/common_single_date_picker.dart:44` | `"dd/MM/yyyy"` | no |
+| `lib/src/presentation/screens/support/view/support_ticket_screen.dart:189` | (date string from API, formatted) | no |
+| `lib/src/presentation/screens/id_verification/view/kyc_history/kyc_history.dart:84` | `"dd MMM yyyy hh:mm a"` | no |
+| `lib/src/presentation/screens/id_verification/view/kyc_history/sub_sections/kyc_history_bottom_sheet.dart:105` | similar | no |
+| `lib/src/presentation/screens/support/view/replay_ticket/replay_ticket.dart:534` | `intl.DateFormat(...)` | no |
+| `lib/src/presentation/screens/settings/view/profile_settings/profile_settings.dart:54,143` | `"dd/MM/yyyy"` | no |
+| `lib/src/presentation/screens/settings/controller/profile_settings_controller.dart:97,99` | `"dd/MM/yyyy"` parse → format | no |
 
-`intl: ^0.20.2` is declared. It's used in 14+ files. Patterns observed:
+**No `DateFormat.yMMMd(locale)` or locale-aware variant is used.** All output is Gregorian `dd/MM/yyyy`.
 
-| File | Pattern |
-|---|---|
-| `common_single_date_picker.dart` | `DateFormat("dd/MM/yyyy")` |
-| `kyc_history.dart` | `DateFormat("dd MMM yyyy hh:mm a")` |
-| `kyc_history_bottom_sheet.dart` | (date format) |
-| `home_transaction_details.dart` | **`NumberFormat.currency(symbol: '', decimalDigits: decimals, name: '')`** |
-| `profile_settings_screen.dart` | `DateFormat(...)` (display), `DateFormat("dd/MM/yyyy").parse(...)` (input) |
-| `profile_settings_controller.dart` | `DateFormat("yyyy-MM-dd").format(DateFormat("dd/MM/yyyy").parse(...))` |
-| `support_ticket_screen.dart` | `DateFormat("dd MMM,yyyy - hh:mm a")` |
-| `reply_ticket.dart` | `intl.DateFormat(...)` (twice) |
-| `create_invoice.dart` / `create_invoice_information_section.dart` | `DateFormat("yyyy-MM-dd").format(...)` (issue date) |
-| `invoice_screen.dart` | `DateFormat("dd MMM yyyy")` |
-| `update_invoice_information_section.dart` | `DateFormat("yyyy-MM-dd")` |
-| `invoice_details.dart` | `DateFormat("dd MMM yyyy")` |
-| `invoice_pdf.dart` | `DateFormat("dd MMM yyyy")` |
+### Transaction list date display (`home_transaction_section.dart:116`)
+```dart
+Text(transaction.createdAt!.split(",").first, …)
+```
+The raw API `created_at` string is split on comma — **no client-side formatting, no locale, no calendar conversion**. Displayed verbatim as the backend sends it.
 
-**Every `DateFormat` and `NumberFormat` is constructed without a locale argument.** That means:
-- Month names will always be English (`Jan`, `Feb`, …) even when the app is Arabic.
-- Number digits will always be Latin ASCII even in Persian/Arabic locales.
-- No Hijri / Jalali calendar support whatsoever.
+### Currency / number formatting
+- **`NumberFormat` is NOT used anywhere** (zero hits in lib/).
+- All amounts are formatted with `toStringAsFixed(decimals)` (e.g. `home_transaction_section.dart:134`):
+  ```dart
+  "${transaction.trxCurrencySymbol}${double.tryParse(transaction.amount!.replaceAll(",", ""))!.toStringAsFixed(calculateDecimals)}"
+  ```
+  No thousands separator, no locale-aware digit substitution, no negative-parentheses, no `NumberFormat.currency(name: …)`.
 
-### 7.2 `lib/src/helper/dynamic_decimals_helper.dart`
+### `lib/src/helper/dynamic_decimals_helper.dart` (16 lines, full file)
+```dart
+int getDynamicDecimals({
+  required String currencyCode,
+  required String siteCurrencyCode,
+  required String? siteCurrencyDecimals,
+  required bool isCrypto,
+}) {
+  if (currencyCode == siteCurrencyCode) {
+    return int.tryParse(siteCurrencyDecimals!) ?? 2;
+  } else {
+    return isCrypto ? 8 : 2;
+  }
+}
+```
+- Reads `site_currency_decimals` from server settings. Sensible. But:
+  - Returns `int`, no locale formatting.
+  - For **Iranian Rial (IRR)**, conventions often use 0 decimals with Persian digits and ر/ت separator — this will show "1000000" instead of "۱٬۰۰۰٬۰۰۰".
+  - For **Turkish Lira (TRY)**, decimal separator should be `,` and thousands `.` — current code uses raw `.`.
+  - For **Russian Ruble (RUB)**, same problem (` ` as thousands separator in ru-RU).
+  - For **Chinese Yuan (CNY)**, Chinese users expect `￥1,234.56` or `1,234.56元`.
 
-A 16-line helper that picks decimal precision (2 for fiat, 8 for crypto, or `site_currency_decimals` from settings). It does NOT format numbers — it just returns an `int` that callers pass to `toStringAsFixed()` or `NumberFormat.currency(decimalDigits: …)`. Acceptable but primitive.
+### Persian / Arabic digits
+- **No conversion anywhere.** No `\u06F0-\u06F9` mapping. Even if you ship Persian translations, amounts and dates will still render with Latin digits, which looks broken to fa-IR users.
 
-### 7.3 Persian/Jalali support
+### Jalali (Persian Solar) calendar
+- **Not supported.** `flutter_rounded_date_picker: ^3.0.4` (in `pubspec.yaml:22`) is a Gregorian picker. There is no `shamsi_date`, `jalali_calendar`, or `persian_datetime_picker` dependency. For Iran, agents will see Gregorian dates in dashboards and pickers, which is operationally confusing (their fiscal year is Jalali 1403/1404).
 
-- ❌ No `shamsi_date`, `jalali_calendar`, `persian_datetime_picker`, or `flutter_localizations` `fa` locale delegate.
-- ❌ No Persian-digit conversion (no `\u06F0`–`\u06F9` mapping).
-- ❌ The bundled `flutter_rounded_date_picker` package does not support Jalali calendar; Persian merchants will see a Gregorian picker.
-
-### 7.4 Currency
-
-- `site_currency` and `site_currency_decimals` come from `/get-settings`. Many widgets read them via `Get.find<SettingsService>().getSetting("site_currency")!` — the `!` is risky; if the settings call fails the app will null-deref crash. Already noted in invoice_pdf.dart line 25–29.
-- `NumberFormat.currency(symbol: '')` is used so the symbol is appended manually as `<amount> <currencyCode>` (e.g. `"100.00 USD"`). There's no localized symbol mapping (no `€`, no `¥`, no `﷼`/`تومان`).
+### Hijri (Islamic) calendar
+- Not present. For UAE/Iran (where Hijri is occasionally used for financial reports) it is optional but should be considered.
 
 ---
 
 ## 8. Country/Region Handling
 
-### 8.1 Models and controllers
+### `country_controller.dart` (38 lines)
+- Calls `/get-countries`, parses `CountryModel → List<CountryData>`.
+- No caching, no locale-aware country-name fetching. Names come from server in presumably one language only.
 
-- `lib/src/common/model/country_model.dart`: `CountryData{name, dialCode, code, flag, selected}`. Standard flat structure.
-- `lib/src/common/controller/country_controller.dart`: fetches `/get-countries`, stores `RxList<CountryData> countryList`.
-- The list comes from the backend; the client does NOT filter to the 5 target regions. The merchant's country is selected **at registration** (`personal_info_screen.dart` lines 64–87) — backend returns one country with `selected: true` (presumably geo-IP based) and the client pre-selects it.
+### `country_model.dart`
+```dart
+class CountryData {
+  String? name; String? dialCode; String? code;
+  String? flag; bool? selected;
+}
+```
+- **No localized name** (no `name_fa`, `name_zh`, etc.).
+- **No currency code on the country** — agents have to infer which currency applies.
+- **No phone-mask pattern** per country — phone input is just `dialCode + digits` with no `libphonenumber` integration (`pubspec.yaml` does **not** include `libphonenumber` or `phone_number`).
 
-### 8.2 Phone-number handling
+### Where country is selected
+- `personal_info_screen.dart:63-85` (`_setSelectedCountry`) — picks the country the server marks `selected: true`. Used during sign-up and in profile edit.
+- The agent's country is therefore chosen at registration, persisted server-side, returned in `/auth/agent/profile` as `User.country` (a string).
+- Country choice is **not used** to:
+  - Drive default locale
+  - Switch calendar
+  - Filter available currencies / payment gateways
+  - Pick FCM push provider (everyone gets FCM)
+  - Show currency-appropriate cash denominations
 
-- `personal_info_screen.dart` line 85: when a country is picked, the dial code is **prefilled into `phoneNoController.text`** as plain text (e.g. `"+98"`). The user then types the rest of the number directly after the dial code in the same TextField. There is no validation, no `libphonenumber` integration, no country-aware formatting, no separate dial-code display.
-- `merchant_phone_show` and `merchant_phone_validation` toggles come from `/get-register-fields/merchant` and gate whether the field is shown/required.
-
-### 8.3 Region detection
-
-There is **no client-side region detection**. Country is whatever the backend returns as `selected: true`. The client does not read SIM ISO, device locale, or GPS.
+### Phone number formatting
+- Plain `TextEditingController` with the dial code pre-filled (`personal_info_screen.dart:83`). No mask, no validation against country-specific patterns (e.g. CN mobile `^1[3-9]\d{9}$`, IR mobile `^09\d{9}$`, RU `^(\+7|8)\d{10}$`, TR `^0?5\d{9}$`, AE `^0?5[024568]\d{7}$`).
 
 ---
 
 ## 9. Screens Inventory
 
-Total screen view files (top-level `*_screen.dart` and equivalents under `view/`): **37**
-Total view dart files (including `sub_sections/`): **76**
-Total controllers: **37** (under `screens/`) + **5** common = 42
-Total models: **17** (under `screens/`) + **5** common = 22
+### Counts
+- **131** Dart files under `lib/src/presentation/screens/`
+- **14** feature directories
+- **41** controllers (controllers live both under `screens/<feature>/controller/` and under `lib/src/common/controller/`)
+- **24** models
+- **10** shared widgets under `lib/src/presentation/widgets/`
+- **35** named routes registered
 
 ### Grouped by feature
-
-| Feature | Screens | Notes |
+| Feature | Screens / sub-sections | Notes |
 |---|---|---|
-| **Auth** | splash, welcome, login (with 2FA sub-screen), forgot_password, pin_verification, reset_password, email (register step 1), verify_email, set_up_password, personal_info, auth_id_verification (5 sub-sections: camera/file/front_camera/back_camera/kyc_submission), sign_up_status | Multi-step registration wizard driven by `registerFields` API |
-| **Home / Dashboard** | home_screen + sub_sections: header, wallets, transactions, transaction_details, drawer, settings_bottom_sheet, home_section_navigator, home_skeleton_loader | Skeleton loader (Shimmer) only on home |
-| **Wallets** | wallets_screen, create_new_wallet, wallet_details, delete_wallet_bottom_sheet | Multi-currency wallets |
-| **Transactions** | transactions_screen, transaction_filter_bottom_sheet, transaction_type_list | **Pagination implemented** (ScrollController + `loadMoreTransactions`) |
-| **Invoice (merchant-specific)** | invoice_screen (list, paginated), create_invoice (+ add_item, information), update_invoice (+ add_item, information), invoice_details (+ invoice_pdf) | PDF generation via `pdf` + `printing`; share via `share_plus` |
-| **API Access Keys (merchant-specific)** | api_access_key_screen | View/copy/regenerate public+secret keys |
-| **QR Code (merchant-specific)** | qr_code_screen | Server-generated SVG QR for merchant ID |
-| **Exchange** | exchange_screen + amount/review/success step sections | Multi-step wizard |
-| **Withdraw** | withdraw_screen + 8 sub_sections (account, amount, review, success, toggle, account_filter, delete_account_dropdown, withdraw_section) + create_withdraw_account, edit_withdraw_account | Most complex screen in the app |
-| **KYC / ID Verification** | id_verification_screen, kyc_history, kyc_history_bottom_sheet | Status states (pending/approved/rejected) |
-| **2FA Authentication** | two_fa_authentication + 3 sub_sections (generate_qr, enable, disable) | TOTP via Google Authenticator |
-| **Notifications** | notification_screen | Merchant-specific notification icons (payment, ticket reply, withdraw approved/rejected) |
-| **Support Ticket** | support_ticket_screen, add_new_ticket, reply_ticket | Attachments supported |
-| **Profile** | profile_screen (with language picker, biometric toggle), profile_settings_screen |  |
-| **Change Password** | change_password_screen |  |
-| **System** | no_internet_connection, maintenance_mode, web_view_screen (for payment gateway redirects) | WebView parses `/success` and `/cancel` URLs by reading `document.body.innerText` and JSON-decoding — fragile |
+| **Authentication** | splash, welcome, sign_in, sign_up → (email → verify_email → personal_info → set_up_password → auth_id_verification → sign_up_status), two_factor_auth, forgot_password (→ pin_verification → reset_password) | 6-step sign-up funnel with KYC at registration |
+| **Home** | home_screen + 6 sub-sections (header, wallets, quick_links, transaction_section, transaction_details, all_menus, skeleton_loader) | Dashboard |
+| **Wallets** | wallets_screen, create_new_wallet, wallet_details + delete_wallet_bottom_sheet | PageView carousel + per-wallet transactions |
+| **Cash-in** | cash_in_screen + 3 sub-sections (amount_step, review_step, success_step) | Agent scans customer UID via FAB QR, enters amount, confirms |
+| **Add money** | add_money_screen + 4 sub-sections (amount, review, pending, success) | Agent top-up own float via gateway |
+| **Withdraw** | withdraw_screen + 8 sub-sections + create_withdraw_account + edit_withdraw_account | Multi-step + bank/crypto account CRUD |
+| **Exchange** | exchange_screen + 3 sub-sections | Agent converts between own wallets |
+| **Transactions** | transactions_screen + filter_bottom_sheet + details_drop_down + type_list | Paginated, infinite scroll, filter by type/status/txn-id |
+| **Profit history** | profit_history_screen + filter_bottom_sheet | Reuses transactions model with `type=agent-profit` |
+| **QR code** | qr_code_screen | Shows agent's own QR for receiving |
+| **QR scanner** | qr_scanner_screen (under `presentation/widgets/`) | `mobile_scanner` + `camerawesome` both bundled |
+| **Support** | support_ticket_screen + add_new_ticket + replay_ticket | Ticketing with attachments |
+| **Notifications** | notification_screen | List + mark-as-read |
+| **Settings** | settings_screen + profile_settings + change_password + two_fa_authentication (enable/disable/generate_qr) + id_verification + kyc_history | |
+| **System** | maintenance_mode, no_internet_connection | Shown on 503 / SocketException |
 
-### Major merchant flows
+### Major agent flows actually implemented
+- ✅ Sign-up with KYC (camera front/back ID capture in `auth_id_verification`)
+- ✅ Sign-in with optional 2FA OTP
+- ✅ Dashboard with wallets carousel + recent transactions
+- ✅ Cash-in (scan customer UID → amount → review → success) — agent receives commission
+- ✅ Withdraw to own bank/crypto account
+- ✅ Exchange between own wallets
+- ✅ QR display (agent's receive code)
+- ✅ QR scan (customer UID for cash-in)
+- ✅ Profit / commission history
+- ✅ Transaction history with filter + pagination
+- ✅ Support tickets
+- ✅ Profile edit, change password, 2FA setup, KYC re-submission, biometric toggle, language toggle (en/ar)
+- ✅ Maintenance / no-internet routing
 
-1. **Onboarding**: splash → welcome → email → verify_email → set_up_password → personal_info → auth_id_verification (KYC) → sign_up_status → navigation.
-2. **Daily use**: home dashboard (wallets + recent transactions) → drawer → wallets/withdraw/exchange/invoice/qr/api_access_key/transactions/notifications/support_ticket.
-3. **Invoice**: create (with line items) → list → details → share payment link / open WebView payment / print PDF.
-4. **Withdraw**: select wallet → select withdraw account (or create) → enter amount → review → submit → success receipt.
-
-### Settlement/reconciliation reports
-
-❌ **None**. There is no settlement report screen, no reconciliation export, no CSV/PDF statement download. For a merchant app this is a feature gap.
-
-### Staff / sub-account management
-
-❌ **None**. Only one merchant account per login. No role-based access, no staff invites, no permission scoping.
+### Major agent flows **NOT** implemented
+- ❌ Daily settlement / end-of-day report (no closing-batch screen)
+- ❌ Float management (agent's own liquidity tracker — current balance is shown but no min-float alert, no auto-reorder from central treasury)
+- ❌ Offline mode (no local cache, no offline queue — app hard-routes to `NoInternetConnection`)
+- ❌ Cash denomination tracking (e.g. for Iran: 50k/100k/500k notes; for Turkey: 200/100/50 TL)
+- ❌ Customer onboarding by agent (agent cannot create a user; user self-registers)
+- ❌ Transaction reversal / dispute flow (no `POST /agent/refund` endpoint, no dispute ticket sub-type)
+- ❌ Receipt printing / thermal printer integration (no `sunmi_printer` or `esc_pos` dependency)
+- ❌ SMS confirmation to customer after cash-in (no `telephony` / `url_launcher sms:` integration)
+- ❌ Tally/cashbox reconciliation at end of shift
 
 ---
 
-## 10. Security Audit
+## 10. Security Audit  ⚠️ High-stakes section for a cash-handling agent app
 
-| Check | Status | Detail |
-|---|---|---|
-| Token storage | ❌ **INSECURE** | `TokenService` uses `shared_preferences` (plaintext XML on Android, plist on iOS). Should be `flutter_secure_storage`. |
-| User password storage | ❌ **CRITICAL** | `SettingsService.saveLoggedInUserPassword()` (settings_service.dart line 68–72) stores the user's **plaintext password** in `shared_preferences` so biometric re-login can re-POST it to `/auth/merchant/login` (login_controller.dart lines 130–138). Anyone with file-system access (rooted Android, jailbroken iOS, backup extraction) gets the password. |
-| FCM token storage | ⚠️ | Stored in `shared_preferences` (`current_fcm_token` key). Less sensitive but should be in secure storage. |
-| Login state, email, biometric toggle | ⚠️ | All in `shared_preferences`. Low-sensitivity but still better in secure storage. |
-| Certificate pinning | ❌ | None. Plain Dio with system trust store. |
-| Release signing | ❌ **CRITICAL** | `android/app/build.gradle.kts` line 31–34: `release { signingConfig = signingConfigs.getByName("debug") }`. Release APK is signed with the debug keystore — Google Play will reject, and any APK published elsewhere is trivially forgeable. |
-| ProGuard / R8 | ❌ | No `proguard-rules.pro` file exists; `minifyEnabled` and `shrinkResources` not set. APK ships with full symbols. |
-| `usesCleartextTraffic` / `networkSecurityConfig` | ⚠️ | Not set in AndroidManifest. Defaults to `false` on Android 9+ (good), but no explicit `network_security_config.xml` for stricter pinning. |
-| API key exposure in `firebase_options.dart` | ⚠️ | Firebase Android & iOS API keys are committed to the repo. Firebase API keys are by design public-facing (restricted by SHA-1 / bundle ID) but still better kept out of source via `--dart-define`. |
-| Per- environment config | ❌ | Single `https://ecardo.ir/api` URL in `api_path.dart` line 4. No flavors, no `--dart-define`. |
-| SSL/TLS | ⚠️ | Default Dio = system trust store, TLS 1.2+. No issue per se but no defense in depth. |
-| API access key handling | ⚠️ | `ApiAccessKeyScreen` displays the secret key in a read-only TextField with no reveal/hide toggle. Anyone glancing at the screen sees the full secret. Copy-to-clipboard is not audited. Should be masked by default with a "reveal" button (which would itself trigger a 2FA prompt ideally). |
-| 2FA / TOTP | ✅ | Properly implemented via QR + Google Authenticator pattern (two_fa_authentication flow). |
-| Biometric gate | ⚠️ | Biometric is **optional** and gated by `isBiometricEnable` toggle in profile screen. There is **no biometric gate enforced on app launch** — a user with biometric enabled can still skip it; and if biometric is disabled, the app opens straight to home after splash. For a fintech app, biometric should be a hard gate on every cold start (and configurable as required by backend `force_biometric` setting). |
-| WebView JavaScript | ⚠️ | `WebViewScreen` uses `JavaScriptMode.unrestricted` and parses `document.body.innerText` as JSON. Acceptable for a trusted payment gateway but ensure the URL is always `https://ecardo.ir/...` and not user-controllable. |
-| Image picker / camera permissions | ✅ | Properly declared; `permission_handler` used. |
-| `MANAGE_EXTERNAL_STORAGE` permission | ❌ | Declared in `AndroidManifest.xml` line 8 (`android.permission.MANAGE_EXTERNAL_STORAGE`) and requested in `qr_code_screen.dart` line 124. This permission is **restricted by Google Play**; the app will be rejected or require a policy exception. Replace with `path_provider` + MediaStore. |
-| `READ/WRITE_EXTERNAL_STORAGE` | ⚠️ | Declared but deprecated on Android 13+; should target `READ_MEDIA_IMAGES` etc. |
-| Hard-coded `kDebugMode` logs | ⚠️ | Network service logs request bodies (including password) in debug builds. Fine for development, but make sure release builds strip these (the `if (kDebugMode)` guard does that, but verify no `print()` slipped through). |
-| Token clearing on logout | ✅ | `submitLogout()` calls `TokenService.clearToken()` and navigates to login. |
-| Session timeout / idle lock | ❌ | None. Once logged in, the session stays alive until the token is rejected by the server. |
+### Token storage — INSECURE
+- `lib/src/network/service/token_service.dart`: uses `shared_preferences` (Android XML, plaintext).
+- `lib/src/common/service/settings_service.dart:81-91`: **also stores the agent's password in plaintext** (`saveLoggedInUserPassword(String password)`) — used to re-authenticate after biometric unlock. **Storing the user password at all is a major red flag**; biometric should unlock a keychain-stored token, not re-send the password.
+- Required: replace with `flutter_secure_storage` (Android Keystore / iOS Keychain), set `IOSOptions(accessibility: KeychainAccessibility.first_unlock)` and `AndroidOptions(encryptedSharedPreferences: true)`.
+
+### Certificate pinning — NONE
+- No `IOHttpClientAdapter`, no `SecurityContext`, no `allowedFingerprints`/SPKI pins.
+- For an agent app where a hijacked session = stolen cash, this is **P0**.
+
+### ProGuard / R8 — NONE
+- No `android/app/proguard-rules.pro` file.
+- `build.gradle.kts` release block does **not** set `isMinifyEnabled = true` or `isShrinkResources = true`. The APK ships with full class/member names — trivial to reverse-engineer API endpoints, models, and logic with `jadx`.
+
+### Debug signing in release — CRITICAL
+- `android/app/build.gradle.kts:31-35`:
+  ```kotlin
+  buildTypes {
+      release {
+          signingConfig = signingConfigs.getByName("debug")
+      }
+  }
+  ```
+- Every "release" APK is signed with the **public debug keystore** (`~/.android/debug.keystore`, password `android`). Google Play will reject it; sideloaded installs are vulnerable to key-spoofing. This is the single most blocking issue before any production release.
+- Fix: create a release keystore, store it as a base64 GitHub Actions secret, add `signingConfigs { create("release") { … } }`, reference it from `buildTypes.release`.
+
+### API key exposure
+- `lib/firebase_options.dart:41,49` — Firebase Web API keys committed to repo. (These are technically public per Firebase design, but should be restricted in the Google Cloud Console to the app's SHA-1/package name, and ideally loaded via `--dart-define`.)
+- `android/app/google-services.json` contains `com.qunzo.user` (sibling user-app client) — should be regenerated without the unrelated client.
+
+### SSL/TLS config
+- Default Dio/HttpClient. No `sslProtocols` enforcement, no `TLS 1.2+` minimum, no `cleartextTrafficPermitted=false` in `network_security_config.xml` (none exists).
+- `AndroidManifest.xml` does **not** declare `android:usesCleartextTraffic="false"`. Since `AndroidManifest.xml` lacks `android:networkSecurityConfig` and lacks `usesCleartextTraffic`, the platform default applies (which on API 28+ blocks cleartext, but explicit declaration is best practice for a fintech app).
+
+### Permissions — over-broad
+- `AndroidManifest.xml:6-8` requests `READ_EXTERNAL_STORAGE`, `WRITE_EXTERNAL_STORAGE`, and **`MANAGE_EXTERNAL_STORAGE`**. The latter is a Google Play policy violation unless you have a documented use case (file managers / backup apps). For a fintech agent app, this will fail Play Store review. Replace with Scoped Storage (`file_picker` and `image_picker` already do this on modern APIs — `MANAGE_EXTERNAL_STORAGE` is unnecessary).
+- `uses-feature android.hardware.camera required="true"` — blocks install on camera-less devices (some kiosks). Set `required="false"`.
+
+### Other security
+- No root detection (`root_checker` / `jailbreak_detection` not in deps).
+- No app-integrity / SafetyNet / Play Integrity API check.
+- No anti-tampering / `Split-apk` detection.
+- `pubspec.yaml` does **not** include `flutter_inappwebview` properly secured — `webview_flutter: ^4.13.0` is used for gateway redirects but there is no JS bridge hardening visible.
+
+### Biometric gate — NOT ENFORCED
+- `BiometricAuthService` exists and works, but the only place it is invoked is `home_controller.dart:106 toggleBiometric()` — a **settings toggle**.
+- `splash_controller.dart:8-28` (full file) routes purely on `getLoginCurrentState()` — **no biometric prompt on app launch, no biometric prompt on app resume**.
+- For an agent app handling physical cash reconciliation, biometric should be **mandatory on cold start and on lifecycle resume** when `currentBiometric == true`.
+- Also note: the password stored in `SettingsService` is used to silently re-login after biometric — this defeats the purpose of biometric (anyone with the password file can impersonate).
 
 ---
 
 ## 11. Performance Audit
 
-| Check | Status | Detail |
-|---|---|---|
-| Image format | ⚠️ | **101 PNG icons** under `assets/icons/png/`, only **10 SVG** under `assets/icons/svg/`. Plus 28 more PNGs (logos, frames, shapes, wallet images, avatars, welcome illustration). Total **~129 PNGs**. Should migrate icon PNGs → SVG (or `.webp`) to cut APK size dramatically. Current PNG icons are typically 2-4 KB each but at 101 files that's ~200–400 KB of icons that could be ~30 KB as SVG. |
-| Image caching | ❌ | `cached_network_image` package is **NOT** in `pubspec.yaml`. The app uses raw `Image.network(...)` in 9 places (wallet avatars, KYC images, profile avatar, support ticket attachments, withdraw account images, dropdown wallet icons). Every navigation re-downloads. |
-| Shimmer / skeleton loaders | ⚠️ | Only **1** skeleton loader (`home_skeleton_loader.dart`). Other long-loading screens show a generic `CommonLoading()` spinner. |
-| Lazy loading on long lists | ⚠️ | `transactions_screen.dart` implements pagination via `ScrollController` (good). `invoice_screen.dart` also paginated (good). `wallets_screen`, `notification_screen`, `support_ticket_screen`, `kyc_history` are **not paginated**. |
-| HTTP cache | ❌ | No `dio_cache_interceptor`. Public GET endpoints (`/get-settings`, `/get-countries`, `/get-currencies`) are re-fetched every cold start. |
-| Deferred components / dynamic feature modules | ❌ | None. Single APK. For a 5-region app with multiple font families and locale packs, consider Play Asset Delivery or deferred components. |
-| Code splitting | ❌ | No `deferred as` imports. |
-| Heavy operations on main thread | ⚠️ | PDF generation (`pdf` package) is synchronous on the UI isolate — `InvoicePDF.generate()` returns a `Future<Uint8List>` but the work is CPU-bound; for large invoices it will jank. Consider `compute()` or `flutter_isolate`. |
-| Image picker / camera | ✅ | `image_picker` + `camerawesome` used. |
-| `flutter_screenutil` | ✅ | Design size `Size(376, 812)` (iPhone 13 mini-ish). `minTextAdapt: true`. |
-| Lottie animation | ✅ | One Lottie file (`wifi_connect.json`) used in `no_internet_connection`. |
-| Animation controllers | ⚠️ | Splash screen creates **4 AnimationControllers** (logo, text, background, merchant) — fine, but verify they're all disposed (they are, in `splash_screen.dart` line 149–155). |
-| `kotlin.incremental=false` | ⚠️ | `android/gradle.properties` line 4 — Kotlin incremental compilation disabled. Slower clean builds, no benefit to release builds. |
-| JVM args | ⚠️ | `-Xmx8G -XX:MaxMetaspaceSize=4G` — very aggressive; will OOM smaller CI machines. |
-| `enableJetifier=true` | ⚠️ | Still enabled. Should be disabled once all Android deps migrate to AndroidX (most are). |
+### Image format — heavy PNG usage
+- `assets/icons/png/` → **121 PNG files** (common, menus, services, notifications, transactions)
+- `assets/icons/svg/` → **10 SVG files** (only bottom-nav + a few common)
+- `assets/images/` → **22 PNG files** (avatar, utils, wallet cards)
+- **All icons are PNG** — every menu row, transaction row, and notification row loads a separate PNG. PNGs cannot be tinted dynamically, so the app carries both a colored and an "alpha" variant of several icons, doubling asset size.
+- Recommended: convert solid-color icons to SVG (already using `flutter_svg`) or use `IconData` from a font (already using Material icons in some places). This alone could cut APK size by 1-3 MB.
+- Wallet card images (`wallet_one.png … wallets_details_card_four.png` + 4 RTL variants = 12 PNGs) are full-bleed backgrounds — these are legitimately PNG (gradient artwork), keep.
+
+### Deferred components / dynamic feature modules
+- **None.** Single APK. For a 5-region rollout, font bundles (CJK fonts alone are 4-10 MB each) could be deferred via Play Asset Delivery to keep base APK under Play Store limits.
+
+### Code splitting
+- **None visible.** No `DeferredLibrary`, no `import 'package:foo' deferred as foo;`. All 14 feature modules load eagerly via `routes_config.dart` `static const` widget instances.
+
+### HTTP cache
+- **None.** Every cold start re-fetches `/get-settings`, `/get-countries`, `/get-currencies`, `/get-transaction-types-and-statuses`, `/agent/dashboard`, `/auth/agent/profile`. No `DioCacheInterceptor`, no `ETag` handling, no `cache-control` respect.
+
+### Image cache
+- `pubspec.yaml` does **NOT** include `cached_network_image` (verified by grep — zero hits). All remote images use raw `Image.network(...)` (see `all_menus_section.dart:234-249` for avatar, also country flags).
+- Result: every navigation that displays an avatar or flag re-downloads the image; on slow Iranian / Chinese networks this is janky. Also no placeholder, no error widget except the ad-hoc `errorBuilder` in `all_menus_section.dart:242-247`.
+
+### Shimmer / skeleton loaders
+- `shimmer: ^3.0.0` is in deps. Only **1** skeleton loader found: `home_skeleton_loader.dart`. Other list screens (transactions, profit_history, wallets) show `CommonLoading()` (a centered spinner overlay) instead of skeletons — poor perceived performance.
+
+### Lazy loading on long lists
+- `wallet_details.dart:61-66`: ScrollController-based infinite scroll → `controller.loadMoreTransactions()`. ✅
+- `transactions_controller.dart:104-141`: `loadMoreTransactions()` with `hasMorePages` guard. ✅
+- `profit_history_controller.dart:108-145`: same pattern. ✅
+- However, `home_transaction_section.dart` uses `ListView.separated` with `shrinkWrap: true` and `NeverScrollableScrollPhysics` inside a `SingleChildScrollView` — this **renders all items eagerly** with no virtualization. For agents with hundreds of daily transactions this will jank. Acceptable today because the dashboard only shows the top ~5 transactions; verify the API truncates.
+
+### Other perf notes
+- `flutter_screenutil: ^5.9.3` with `designSize: Size(376, 812)` (iPhone 13 mini-ish) — fine for current single-design system; RTL/CJK text may need different scaling.
+- `lottie: ^3.3.2` is bundled but only one Lottie file exists (`assets/others/json/wifi_connect.json`); underused.
 
 ---
 
 ## 12. Build & CI/CD
 
-### 12.1 Flavors / build variants
+### Flavors / build variants
+- **None.** Single `defaultConfig` in `android/app/build.gradle.kts`. No `productFlavors { dev {…} staging {…} prod {…} }`. No `--flavor` parameter. No Xcode schemes other than the default `Runner.xcscheme`.
 
-❌ **None.** Single `release` build type signed with debug keystore (see §10). No `productFlavors` block, no `dev`/`staging`/`prod` separation.
+### Environment separation
+- **None.** Single hard-coded `baseUrl = 'https://ecardo.ir/api'` in `lib/src/network/api/api_path.dart:3`. No `.env`, no `--dart-define=BASE_URL=…`, no `String.fromEnvironment`. Dev/staging/prod all hit production.
 
-### 12.2 Environment separation
+### CI/CD config
+- `.github/workflows/flutter.yml` (39 lines) — full file:
+  - Triggers on `push` to `main` and `workflow_dispatch`.
+  - Sets up Java 17 + Flutter 3.44.0.
+  - Runs `flutter pub get` then `flutter build apk --release` then uploads the APK as an artifact.
+  - **No tests** (`flutter test` absent).
+  - **No iOS build**.
+  - **No code signing** (no keystore secret, no App Store Connect API key).
+  - **No Play Store upload** (no `upload-google-play` action).
+  - **No versioning strategy** — version comes from `pubspec.yaml: version: 1.0.0+1` and is never bumped.
+  - **No obfuscation** (`flutter build apk --release --obfuscate --split-debug-info=…` not used).
+  - **No Fastlane** (`fastlane/` directory does not exist).
+  - **No Codemagic** (`codemagic.yaml` does not exist).
+- `pubspec.yaml` ships `change_app_package_name: ^1.5.0` as a runtime dependency — this is a dev-only tool and should be moved to `dev_dependencies`.
 
-❌ **None.** Hard-coded `https://ecardo.ir/api` in `api_path.dart`. No `--dart-define=BASE_URL=...` usage.
-
-### 12.3 CI/CD
-
-- `.github/workflows/flutter.yml` (39 lines): on push to `main` or workflow_dispatch, builds a release APK with Flutter 3.44.0 on Ubuntu, uploads as artifact.
-- ❌ No iOS build job.
-- ❌ No test job (`flutter test` is never run — and there are **zero test files** in the repo).
-- ❌ No lint job (`flutter analyze` not run in CI).
-- ❌ No version bumping, no Play Store upload, no TestFlight upload.
-- ❌ No fastlane, no codemagic.yaml.
-
-### 12.4 Versioning
-
-`pubspec.yaml` line 5: `version: 1.0.0+1`. Not bumped in CI. `versionCode = flutter.versionCode` and `versionName = flutter.versionName` in `build.gradle.kts` — fine but requires manual pubspec edits.
-
-### 12.5 Flutter / Dart versions
-
-- `pubspec.yaml`: `sdk: ^3.9.2`, comment says Flutter 3.35.7, Dart 3.9.2.
-- CI uses Flutter 3.44.0 (mismatch — pubspec says 3.35.7, CI installs 3.44.0). Not a hard error since `^3.9.2` is a Dart SDK constraint, but the comment is misleading.
-- Gradle 8.11.1, AGP 8.9.1, Kotlin 2.1.0, compileSdk 36, minSdk 24, NDK 27.0.12077973.
+### Versioning
+- `pubspec.yaml:5` → `version: 1.0.0+1`. No semantic-version policy, no changelog (no `CHANGELOG.md` or `RELEASE_NOTES.md` exists).
 
 ---
 
 ## 13. Deep Links / App Links
 
-### 13.1 Android
+### Android
+- `AndroidManifest.xml:28-31` contains **only** the LAUNCHER intent-filter. No `<data android:scheme="…">`, no `android:autoVerify="true"`, no `VIEW` action.
+- No `ecardo://` scheme. No `https://ecardo.ir/…` app links.
 
-❌ **No `<intent-filter>` with `<data android:scheme="..."/>`** in `AndroidManifest.xml`. The only intent-filter is the standard LAUNCHER one. No `autoVerify="true"` app links.
+### iOS
+- `Info.plist` contains **no `CFBundleURLTypes`** (verified by grep). No `associated-domains` entitlement (the `Runner.entitlements` file was not inspected in detail but no `applinks:ecardo.ir` entry is referenced anywhere in the repo).
 
-### 13.2 iOS
-
-❌ No associated domains entitlement in `Runner.entitlements` (only `aps-environment`). No `CFBundleURLTypes` in `Info.plist`.
-
-### 13.3 Consequence for merchants
-
-- The invoice "share" feature (`invoice_screen.dart` line 378) uses `SharePlus.instance.share(ShareParams(text: invoice.transaction?.paymentGatewayUrl ?? ""))` — it shares a **plain URL string** via the OS share sheet. The recipient opens it in a browser; there's no way to deep-link back into the merchant app.
-- After a successful payment in `WebViewScreen`, the result is passed back via `Get.back(result: {'success': true, ...})` — fine for in-app, but no mechanism for a payment-link recipient to land back in the app.
-- For a merchant product, **payment-link deep links** (`https://ecardo.ir/pay/{invoiceId}` opening the user-side app, not this merchant app) and **invoice-edit deep links** (`https://ecardo.ir/m/invoice/{id}` opening the merchant app) are commonly expected. Both are missing.
+### Impact
+- Cannot deep-link from emails (verification, password reset, ticket reply), SMS confirmations, or the ecardo.ir website into the app.
+- Push-notification taps (`firebase_messaging_service.dart:69 _onMessageOpenedApp`) just `print()` the data — no routing, because there is no deep-link router. This is a major UX gap: an agent gets a "Cash-in received" notification, taps it, and lands on the home screen instead of the transaction.
 
 ---
 
 ## 14. Push Notifications
 
-### 14.1 `lib/src/common/services/firebase_messaging_service.dart`
+### `lib/src/common/service/firebase_messaging_service.dart` (74 lines, full file)
+- Singleton via `_internal`.
+- `init()` → requestPermission(alert/badge/sound), `getToken()`, `onTokenRefresh`, `onMessage`, `onMessageOpenedApp`, `getInitialMessage`.
+- Foreground messages are forwarded to `LocalNotificationsService.showNotification(title, body, data.toString())`.
+- `onMessageOpenedApp` only `print()`s — **no tap routing**.
 
-- Singleton (`FirebaseMessagingService._internal()`).
-- `init()` requests permission, gets token, saves to `SettingsService` (in `shared_preferences` — see §10), listens to `onMessage` (foreground) and `onMessageOpenedApp` (background tap), processes `getInitialMessage()` (terminated launch).
-- Foreground messages are forwarded to `LocalNotificationsService.showNotification(title, body, payload)`.
+### `lib/src/common/service/local_notification_service.dart` (75 lines, full file)
+- Single channel: `id='channel_id'`, `name='Default Channel'`, `Importance.max`.
+- All notifications (commission, ticket reply, cash-in received, manual deposit rejected, etc.) collapse into this one channel. On Android O+ the user cannot mute "ticket reply" while keeping "commission received" on — they are all-or-nothing.
+- No per-category channels (commission, ticket, cash-in, security, marketing).
 
-### 14.2 `lib/src/common/services/local_notifications_service.dart`
+### China — FCM does NOT work
+- Firebase Cloud Messaging relies on Google Play Services, which is **absent from Huawei/Honor devices sold in China** and on most Chinese-market Android.
+- The current code blindly calls `FirebaseMessaging.instance.requestPermission()` and `getToken()` — on Chinese devices this returns `null` and the agent silently gets **no notifications**.
+- Required for China: integrate **HMS Push Kit** (`huawei_push`) and/or **JPush / Getui / Meizu Push / Xiaomi MiPush** as fallback when `device_info_plus` detects a Chinese OEM or when `FirebaseMessaging.getToken()` returns null after a grace period.
 
-- Singleton. Creates one Android notification channel `channel_id` / "Default Channel".
-- No per-category channels (e.g., payment received, withdraw approved, ticket reply). All notifications go to "Default Channel" — user cannot mute just "ticket replies" without muting everything.
+### Iran — FCM unreliable
+- Google services are not blocked per se, but Google Play Services is rarely pre-installed on Iranian-market devices (which run sideloaded Android). FCM will work only on devices where the user has installed GMS. Consider an alternative:
+  - **Pushe** (Iranian push service, `co.pushe.plus:pushe` Android SDK)
+  - Self-hosted **WebSocket / MQTT** channel from the ecardo backend
+  - **SMS fallback** for high-priority events (commission > $X)
 
-### 14.3 Region-specific push gaps (CRITICAL)
+### Russia / Turkey / UAE
+- FCM works normally in these regions. No special handling required, but be aware of Russia's data-localization law (Fz-152) — push payloads may need to stay within Russia for Russian agents.
 
-- **China (CN)**: FCM is **blocked**. There is **no HMS Push Kit, no JPush, no Getui, no OPPO Push, no Vivo Push, no Xiaomi Push** integration. Chinese merchants will receive **zero push notifications**. This is a P0 for the Chinese market.
-- **Iran (IR)**: FCM works but is **slow/unreliable** due to bandwidth shaping; consider a fallback SaaS push provider (e.g., Pushe — an Iranian push service) or a self-hosted MQTT/WebSocket.
-- **iOS in China**: Apple Push Notification service (APNs) works in China but is also throttled.
-- **Russia (RU)**: FCM works (Google services still generally available; situation fluid post-sanctions). No special handling needed today but plan for a Matreshka/VK alternative if sanctions tighten.
-- **Turkey / UAE**: FCM works normally.
+### Notification channels (Android O+)
+- Single channel is insufficient. Recommended channels:
+  - `agent.commission` (commission earned)
+  - `agent.cashin.received` (customer paid agent)
+  - `agent.ticket.reply` (support ticket update)
+  - `agent.deposit.rejected` (manual deposit rejected)
+  - `agent.security` (login alert, 2FA disabled, password changed)
+  - `agent.default` (everything else)
 
-### 14.4 Notification channel strategy (Android O+)
-
-Only one channel. Recommendation: split into `payments`, `withdraw`, `tickets`, `security`, `marketing` channels with proper importance levels so users can fine-tune.
+### Other push gaps
+- No `setup-fcm` API call is invoked anywhere despite `ApiPath.getSetupFcm = '/setup-fcm'` existing. The FCM token is saved to `SettingsService` but **never sent to the server**. Therefore the backend **cannot push to this device**. This is a functional bug, not just a feature gap.
 
 ---
 
 ## 15. Biometric / Local Auth
 
-### 15.1 `lib/src/common/services/biometric_auth_service.dart`
+### `lib/src/common/service/biometric_auth_service.dart` (52 lines)
+- Uses `local_auth: ^3.0.0` with `biometricOnly: true` (good — prevents class-3 weak auth fallback).
+- Methods: `authenticateWithBiometrics()`, `isBiometricAvailable()`.
+- Localized strings via `AppLocalizations.of(Get.context!)`.
 
-- Uses `local_auth: ^3.0.0` (Flutter plugin wrapping Android BiometricPrompt and iOS LocalAuthentication).
-- `authenticateWithBiometrics()` checks `canCheckBiometrics`, `isDeviceSupported()`, `getAvailableBiometrics()` and calls `auth.authenticate(localizedReason: ..., biometricOnly: true)`. `biometricOnly: true` is correct (prevents PIN fallback which would weaken the gate).
+### Enforcement
+- **NOT enforced on app launch.** `splash_controller.dart` only checks `getLoginCurrentState()`.
+- **NOT enforced on app resume.** No `WidgetsBindingObserver.didChangeAppLifecycleState` listener anywhere in the codebase (grep for `didChangeAppLifecycleState` returns nothing).
+- The only call site is `home_controller.dart:106 toggleBiometric()` (settings toggle) and the password re-login path described in §10.
+- For a cash-handling app, biometric should:
+  1. Prompt on cold start if `currentBiometric == true` AND user is logged in.
+  2. Prompt on `AppLifecycleState.resumed` after backgrounding.
+  3. Block the dashboard (`PopScope canPop:false` + biometric overlay) until authenticated.
+- Currently it does none of these — the toggle is cosmetic.
 
-### 15.2 Enforcement
-
-- Biometric is **opt-in** via profile screen toggle (`profile_screen.dart` line 244–270 → `HomeController.toggleBiometric()`).
-- When enabled, the user's **plaintext email + password** are saved to `shared_preferences` (login_controller.dart lines 127–139) so that on next launch, biometric auth → re-POST credentials to `/auth/merchant/login`. This is the critical security flaw.
-- ❌ No biometric gate on app cold-start. The app launches → splash → `SplashController.navigateBasedOnAuth()` checks only `getLoginCurrentState()` (splash_controller.dart line 21). If "logged_in" state is set, it routes to `BaseRoute.login` (which would then auto-fill credentials and use biometric). However, if the user is mid-session with a valid token, the app goes straight to `BaseRoute.navigation` (home) without any biometric challenge.
-
-### 15.3 Recommendation
-
-Replace the "save password & re-login" pattern with a **refresh-token / long-lived session** approach:
-- Server issues a long-lived refresh token (HttpOnly cookie on web, secure storage on mobile).
-- Biometric unlocks a key in `flutter_secure_storage` that decrypts the refresh token.
-- App uses refresh token to get new access tokens; no plaintext password ever stored.
+### iOS entitlement
+- `Info.plist:12-13` declares `NSFaceIDUsageDescription = "Why is my app authenticating using face id?"` — this default placeholder text **will be rejected by App Store review**. Must be a real sentence: "ecardo Agent uses Face ID to protect your agent account and authorize cash-in transactions."
 
 ---
 
-## 16. Merchant-Specific Features
+## 16. Agent-Specific Features
 
-### 16.1 Invoice generation (PDF)
+### Cash-in flow (`cash_in_screen.dart` + `cash_in_controller.dart`)
+- 3-step stepper: Amount → Review → Success.
+- Agent can either enter a customer's UID/account-number manually or scan a QR (FAB on `navigation_screen.dart:77` opens `QrScannerScreen`, parses `UID:\d+` or pure digits, routes to `BaseRoute.cashIn` with `{"uid_account": uid}`).
+- Request body: `{account_number, amount, wallet_id}` → `POST /agent/cashin`.
+- Charge calculation: `cashInConfig.settings.charge` + `chargeType` (percentage OR fixed → converted via `/convert/{amount}/{currency}` endpoint).
+- Min/max limits validated client-side using `DynamicDecimalsHelper`.
+- **No offline mode**: if network drops mid-flow, the agent has taken physical cash from the customer but the app cannot record it. There is no pending-queue / outbox pattern.
 
-`lib/src/presentation/screens/invoice/view/invoice_details/sub_sections/invoice_pdf.dart` (368 lines). Uses `pdf: ^3.11.3` + `printing: ^5.14.2`.
+### Profit / commission tracking
+- `profit_history_controller.dart` queries `/agent/transactions?type=agent-profit&page=…`.
+- Transaction icons exist for `cash_in_commission_transaction.png` and `cash_out_commission_transaction.png` (assets/icons/png/transactions/).
+- Profit is shown as a transaction list — **no aggregate KPIs** (today's commission total, this-week, this-month, by-currency breakdown). Agents cannot answer "how much did I earn today?" without manually summing.
+- Notification asset `agent_commission_notification.png` exists, so commission notifications do fire (server-side).
 
-- Layout: logo top-left, ref number + issued date top-right, customer info + Paid/Unpaid badge, total amount, item table (name/quantity/unit price/subtotal), totals, "Thanks for the purchase" footer.
-- ✅ Localized labels (via `localization.invoicePdfXxx`).
-- ❌ **No bundled fonts in PDF** → Arabic/Persian/CJK/Cyrillic will be tofu (see §3.4).
-- ❌ Date format hard-coded `"dd MMM yyyy"` — month names will be English even in Arabic.
-- ❌ PDF generated synchronously on UI isolate.
-- ❌ No PDF preview screen — `Printing.layoutPdf()` sends directly to system print dialog. A "share PDF" option (via `share_plus`) would be more useful for merchants.
+### QR code payment acceptance
+- `qr_code_screen.dart` shows the agent's own UID/account-number QR for receiving.
+- `qr_scanner_screen.dart` scans customer QR for cash-in (parses `UID:\d+`).
+- **No support for parsing standard payment QR formats** (EMVCo, Iran's Shetab QR, Turkey's TR QR, Russia's SBP QR). Customer must have an ecardo QR specifically.
 
-### 16.2 API access key management
+### Customer onboarding
+- Agent does **not** onboard users. Users self-register via the user app (referenced as `com.qunzo.user` in `google-services.json`).
+- Agent can only cash-in to existing users (by UID) — there is no "create user on behalf of customer" flow, which is a common agent capability in markets like Iran (opening a wallet for walk-in customers).
 
-`api_access_key_screen.dart` (see §6.4). Two fields (public + secret), copy buttons, regenerate button with confirm dialog. Endpoint: `GET /merchant/access-keys`, `POST /merchant/access-keys/regenerate`.
+### Daily settlement / end-of-day report
+- **NONE.** No `agent/settlement` endpoint, no settlement screen, no "close day" button. Agents cannot reconcile their cash drawer against the system.
 
-### 16.3 QR code generation
+### Float management
+- **NONE.** Agent's wallet balance is shown (home_wallets_section), but there is no:
+  - Min-float alert
+  - "Request top-up from treasury" flow
+  - Per-currency float allocation
+  - Auto-rebalance suggestion
 
-`qr_code_screen.dart` (see §6.3). Server returns SVG string via `/merchant/qrcode`. Client renders via `SvgPicture.string(...)`. Download via `Permission.manageExternalStorage` (problematic — see §10).
+### Transaction reversal / dispute handling
+- **NONE.** No `POST /agent/refund`, no dispute ticket sub-type. If an agent cashes-in to the wrong UID, the only recourse is a support ticket — no in-app reversal.
 
-### 16.4 Settlement / reconciliation reports
+### Offline mode
+- **NONE.** `splash_controller.dart` hard-routes to `NoInternetConnection` on `ConnectivityResult.none`. Even cached dashboard data is not shown. For agents in rural Iran / inland China, this means the app is a paperweight without signal.
 
-❌ None. No screen, no endpoint, no CSV/Excel/PDF statement export.
-
-### 16.5 Multi-currency wallet handling
-
-✅ Each wallet has `currency`, `isCrypto`, `balance`, `isDefault`. `DynamicDecimalsHelper` switches decimal precision. Converter endpoint `/convert/{amount}/{currencyCode}/{isThousandSeparatorRemove}` (and currency-to-currency variant) provides live rates.
-
-### 16.6 Staff / sub-account management
-
-❌ None. Single-tenant login.
-
-### 16.7 Webhook configuration
-
-❌ None. Merchants integrating the API access key need to set webhooks somewhere — there's no in-app screen for it.
-
-### 16.8 Transaction dispute / chargeback
-
-❌ None.
-
-### 16.9 Refund issuing
-
-❌ None (refund icons exist in `assets/icons/png/transactions/refund_transaction_icon.png` but no refund-issuing screen).
+### Other agent gaps
+- No thermal-receipt-printer integration (common in Iran/Turkey agent shops; Sunmi, Epson TM, etc.).
+- No SMS confirmation to customer (`"You received 1,000,000 IRR via ecardo agent #X"`).
+- No agent-tier commission schedule visibility (agent cannot see "I earn 0.5% on cash-in, 0.3% on cash-out").
+- No agent referral / sub-agent management (common in multi-tier agent networks).
 
 ---
 
 ## 17. Region-Specific Features Missing
 
-### 17.1 Iran (fa)
+| Region | Locale | Calendar | Digits | Payment gateways | Push | ID verification | Phone format | Cash denominations | Other |
+|---|---|---|---|---|---|---|---|---|---|
+| **Iran** | fa (missing) | Jalali (Solar Hijri) — **missing** | Persian digits (`۰۱۲۳۴۵۶۷۸۹`) — **missing** | Shaparak / Zarinpal / NextPay / Asan Pardakht — **none integrated** (only server-side "gateway methods") | FCM unreliable → Pushe / MQTT fallback — **missing** | Iranian National ID (`کد ملی`) 10-digit validator — **missing** | `^09\d{9}$` mask — **missing** | IRR notes 50k/100k/500k/1M — **missing** | Sheba (IBAN-IR) validator for withdraw |
+| **China** | zh-Hans (missing) | Gregorian OK | Latin OK (Chinese apps often use Latin digits) | WeChat Pay / Alipay / UnionPay — **none integrated** | HMS Push / JPush / MiPush — **missing** | Chinese Resident ID (`身份证`) 18-digit validator — **missing** | `^1[3-9]\d{9}$` mask — **missing** | RMB 100/50/20/10/5/1 — **missing** | Real-name auth, MIIT compliance |
+| **Russia** | ru (missing) | Gregorian OK | Latin OK | YooMoney / Mir / SBP QR / QIWI — **none integrated** | FCM OK | INN (`ИНН`) 10/12-digit — **missing** | `^(\+7|8)\d{10}$` — **missing** | RUB 5000/2000/1000/500/100 — **missing** | Fz-152 data localization, Mir card support |
+| **Turkey** | tr (missing) | Gregorian OK | Latin OK | iyzico / PayTR / Param / Papara — **none integrated** | FCM OK | T.C. Kimlik No 11-digit validator — **missing** | `^0?5\d{9}$` — **missing** | TRY 200/100/50/20/10/5 — **missing** | KVKK compliance |
+| **UAE** | ar (existing, partial) | Gregorian OK (Hijri optional) | Arabic-Indic digits (`٠١٢٣٤٥٦٧٨٩`) optional | PayTabs / Network International / Checkout.com — **none integrated** | FCM OK | Emirates ID 15-digit — **missing** | `^0?5[024568]\d{7}$` — **missing** | AED 1000/500/200/100/50/20/10/5 — **missing** | CBUAE compliance, VAT 5% display |
 
-| Feature | Status | Recommendation |
-|---|---|---|
-| Persian language (`app_fa.arb`) | ❌ missing | Add ARB file with 478 keys |
-| Persian font (Vazirmatn) | ❌ missing | Bundle `Vazirmatn-Variable.ttf` |
-| Persian digits (۰۱۲۳…) | ❌ missing | Add `NumberFormat(..., 'fa')` + `intl` `fa` locale; or hand-roll a digit mapper |
-| Jalali (Shamsi) calendar | ❌ missing | Add `shamsi_date` or `persian_datetime_picker`; replace `flutter_rounded_date_picker` for fa locale |
-| Iranian payment gateways (Zarinpal, Shaparak, Sadad, Melli, Sep) | ⚠️ backend-dependent | The `paymentGatewayUrl` returned by `/merchant/invoices/{id}` presumably routes through whatever backend integration exists. Client just opens WebView. **No client-side change needed** unless merchants should pick gateway at invoice creation. |
-| Iranian IBAN (Sheba) validation | ❌ missing | Add `iran_sheba` package or regex validator on withdraw account creation |
-| Persian (Rial/Toman) currency formatting | ⚠️ partial | `site_currency` is configurable; need to ensure `IRR` symbol and 0-decimal rendering works |
-| FCM reliability | ⚠️ slow | Consider Pushe fallback |
-
-### 17.2 China (zh)
-
-| Feature | Status | Recommendation |
-|---|---|---|
-| Chinese language (`app_zh.arb`) | ❌ missing | Add ARB; consider both `zh-CN` and `zh-TW` |
-| Chinese font (Noto Sans SC / TC) | ❌ missing | Bundle — adds ~5–10 MB; consider Play Asset Delivery or `google_fonts` runtime fetch (but Google Fonts blocked in CN) |
-| Chinese ID (身份证) verification | ❌ missing | Need a Chinese ID validator; KYC fields may differ — backend `/get-register-fields/merchant` should return CN-specific fields |
-| Chinese phone format (+86, 11 digits) | ❌ missing | Add `libphonenumber` with region `CN` |
-| WeChat Pay / Alipay | ❌ no client integration | If backend supports them, payment gateway URL works; otherwise need WeChat SDK integration (`fluwx`) and Alipay SDK (`tobias`) |
-| HMS Push / JPush / OPPO/Vivo/Xiaomi push | ❌ missing | P0 — FCM is blocked in CN |
-| Mainland China app store distribution | ❌ not addressed | Need separate build for Huawei AppGallery, OPPO, Vivo, Xiaomi, Tencent MyApp stores |
-| ICP filing (ICP 备案) | ❌ not addressed | Required for any app distributed in CN; legal/regulatory blocker |
-
-### 17.3 Russia (ru)
-
-| Feature | Status | Recommendation |
-|---|---|---|
-| Russian language (`app_ru.arb`) | ❌ missing | Add ARB |
-| Russian font | ⚠️ Plus Jakarta Sans may have Cyrillic; verify, else bundle Noto Sans |
-| YooMoney (ЮMoney) | ❌ no client integration | Backend may support; if not, need SDK |
-| Mir card | ❌ no client integration | Backend-dependent; ensure payment WebView supports Mir's 3DS flow |
-| Russian phone format (+7) | ❌ missing | Add `libphonenumber` with region `RU` |
-| RuStore distribution | ❌ not addressed | Required if Google Play unavailable |
-
-### 17.4 Turkey (tr)
-
-| Feature | Status | Recommendation |
-|---|---|---|
-| Turkish language (`app_tr.arb`) | ❌ missing | Add ARB |
-| Turkish font | ✅ Plus Jakarta Sans covers Latin TR |
-| iyzico / PayTR | ❌ no client integration | Backend-dependent; ensure 3DS flow works in WebView |
-| Turkish phone format (+90) | ❌ missing | Add `libphonenumber` with region `TR` |
-| Turkish IBAN (TR\d{2}\s…) | ❌ missing | Add IBAN validator |
-
-### 17.5 UAE (ar-AE) — already partially covered by `ar`
-
-| Feature | Status | Recommendation |
-|---|---|---|
-| Arabic language | ✅ `app_ar.arb` exists |
-| Arabic font | ❌ Plus Jakarta Sans has no Arabic glyphs — bundle Noto Sans Arabic or IBM Plex Sans Arabic |
-| Arabic-Indic digits (٠١٢٣…) | ❌ missing | `NumberFormat(..., 'ar')` produces them; ensure widget `TextDirection` is RTL |
-| Hijri calendar (optional) | ❌ missing | Some UAE users prefer Hijri for personal dates (DOB); add `hijri` package as opt-in |
-| PayTabs / Network International / Telr | ❌ no client integration | Backend-dependent |
-| UAE phone format (+971) | ❌ missing | Add `libphonenumber` with region `AE` |
-| Emirates ID verification | ❌ missing | Backend `/get-register-fields/merchant` should return EID fields; client should add EID validator |
-| RTL layout correctness | ⚠️ partial | 6 files handle RTL explicitly; many don't — needs full RTL audit pass |
+### Agent-specific per-region gaps (consolidated)
+- **Settlement cycles**: Iran (daily close), Turkey (daily close + Z-raport), UAE (end-of-shift cash count), Russia (сменa), China (日结) — none implemented.
+- **Cash denominations**: every region has distinct note denominations that an agent must reconcile at EOD; the app provides no denomination picker or auto-tally.
+- **Regulatory**: no per-region KYC document type lists (Iran: carta melli; China: shenfenzheng + bank card; Russia: passport / SNILS / INN; Turkey: kimlik + vergi no; UAE: Emirates ID + passport) — the current `auth_id_verification` flow uses a generic front/back-of-ID capture which may not satisfy each region's regulator.
 
 ---
 
 ## Critical Issues (P0 — must fix before launch)
 
-1. **Release APK is signed with the debug keystore.** `android/app/build.gradle.kts` lines 31–34. Google Play will reject; APK is forgeable. Create a proper release keystore, set up `signingConfigs.release`, and store the keystore + passwords in CI secrets.
-2. **User's plaintext password is persisted in `shared_preferences`.** `SettingsService.saveLoggedInUserPassword()` + `getLoggedInUserPassword()`. Used for biometric re-login. Switch to refresh-token + `flutter_secure_storage` pattern (see §15.3).
-3. **Access token stored in `shared_preferences`.** `TokenService`. Migrate to `flutter_secure_storage`.
-4. **Firebase project is `qunzo-b2252` and shared with `qunzo.agent` and `qunzo.user`.** `google-services.json` contains 3 clients. Create a new dedicated Firebase project for `ecardo.merchant`, re-run `flutterfire configure`, replace all config files.
-5. **App is still branded "qunzo" everywhere.** Dart package, Android applicationId/namespace, iOS bundle ID, app labels, `AppStrings.appName`, class name `QunzoMerchant`, splash screen "unzo" typo. See §1 for full file list.
-6. **`_normalizeLocale` whitelist forces fa/zh/tr/ru users to English.** `app.dart` lines 22–33. Must be extended (or removed) when adding new locales.
-7. **Bundled font (Plus Jakarta Sans) has no Arabic glyphs.** Arabic translation already shipped but renders as tofu on devices without system Arabic fallback. Bundle Noto Sans Arabic / Vazirmatn immediately.
-8. **FCM is the only push channel.** Chinese merchants will receive zero notifications. Add HMS Push + at least one Chinese push provider.
-9. **`MANAGE_EXTERNAL_STORAGE` permission declared.** Will fail Google Play review. Replace with `path_provider` + MediaStore API in `qr_code_screen.dart`.
-10. **PDF generation has no fonts.** Arabic/Persian/CJK/Cyrillic text in invoice PDFs renders as tofu. Register `pw.Font.ttf(...)` for each script.
+1. **Debug signing in release build** (`android/app/build.gradle.kts:33`) — release APK is signed with debug keystore. Cannot ship to Play Store / App Store. Cannot be verified by users. **Single biggest blocker.**
+2. **Token + password stored in plaintext SharedPreferences** (`token_service.dart`, `settings_service.dart:81-91`). For a cash-handling app this is unacceptable. Migrate to `flutter_secure_storage`; **remove the password-storage code path entirely** and replace biometric re-login with secure-token unlock.
+3. **No certificate pinning** — bearer-token API calls over plain HTTPS are MITM-able on rooted devices or hostile Wi-Fi.
+4. **Biometric is not enforced on launch or resume** — only a settings toggle. Critical for an agent app that authorizes cash movements.
+5. **FCM token never sent to backend** — `ApiPath.getSetupFcm = '/setup-fcm'` exists but is **never called**. Notifications cannot be delivered. Also `_onMessageOpenedApp` does nothing (no deep-link routing).
+6. **No ProGuard/R8 / no minification / no obfuscation** — APK is fully reversible; API paths and models leak trivially.
+7. **`MANAGE_EXTERNAL_STORAGE` permission** — Google Play policy violation for a fintech app; will fail review.
+8. **App is still 100% branded "Qunzo Agent"** — `com.qunzo.agent`, "Qunzo Agent" label, splash wordmark "unzo", `QunzoAgent` class, 165 files importing `package:qunzo_agent/`. The only ecardo string is the API URL. Cannot launch under ecardo brand without full rebrand.
+9. **`Plus Jakarta Sans` does not render Arabic/Persian/CJK** — current Arabic UI relies on system fallback (tofu on some devices). Adding fa/zh will be visually broken without font additions.
+10. **No env separation / no flavors** — every developer, every CI build, every test run hits production `ecardo.ir/api`. A single bad deploy contaminates prod data.
 
 ## High Priority Issues (P1)
 
-1. **No certificate pinning.** Add `dio_certificate_pinning` or implement via `IOHttpClientAdapter` + `SecurityContext`.
-2. **No ProGuard/R8.** Create `proguard-rules.pro`, enable `minifyEnabled true` + `shrinkResources true` in release build.
-3. **No dark theme.** Either remove `values-night/styles.xml` and the dark-mode icons or implement `dark_theme.dart` + a `ThemeController`.
-4. **No flavors / no environment separation.** Add `dev`/`staging`/`prod` product flavors and `--dart-define=BASE_URL=...`.
-5. **No `cached_network_image`.** Network images re-download on every navigation. Add the package and replace `Image.network(...)` (9 call sites).
-6. **No iOS `CFBundleLocalizations`.** iOS won't expose supported languages to the system.
-7. **No deep links / app links.** Merchants cannot return to the app from a shared payment link. Add `ecardo.ir` app links (Android `autoVerify="true"`) + iOS associated domains.
-8. **No retry interceptor + no timeouts on Dio.** A hung server freezes the app. Add `connectTimeout: 15s`, `receiveTimeout: 30s`, and a retry interceptor for idempotent GETs.
-9. **No token refresh.** Users must re-login on every 401. Implement refresh-token rotation.
-10. **API access key secret is displayed in plain text.** Add reveal/hide toggle and consider re-auth (biometric/2FA) before reveal.
-11. **No biometric gate on cold start.** For fintech, biometric should be a hard gate when enabled.
-12. **No settlement / reconciliation reports.** Major merchant feature gap.
-13. **No tests.** Zero test files. CI doesn't run `flutter test` or `flutter analyze`.
-14. **CI builds only Android.** No iOS CI, no TestFlight upload.
-15. **No Sentry / Crashlytics / Firebase Analytics.** No crash reporting in production.
-16. **Locale-unaware `DateFormat` / `NumberFormat` everywhere.** Will display English month names and Latin digits even in fa/zh/ru.
+1. **Missing 4 of 5 target-region locales** — `fa`, `zh`, `tr`, `ru` ARB files don't exist. `supportedLocales` in `app.dart:62` hard-coded to `[en, ar]`. Language picker in `settings_screen.dart:159` hard-coded to `["English", "Arabic"]`. `changeLanguage()` in `home_controller.dart:81-103` falls through to `"en"` for anything else.
+2. **No FCM alternative for China (HMS Push / JPush) and Iran (Pushe / MQTT)** — agents in those regions will receive zero push notifications.
+3. **No date/number locale-aware formatting** — `DateFormat("dd/MM/yyyy")` hard-coded in 6 files; `NumberFormat` unused; raw `toStringAsFixed()` for amounts. No Persian digits, no `fa-IR`/`ru-RU`/`tr-TR`/`zh-CN` separators.
+4. **No Jalali calendar / Hijri calendar option** — `flutter_rounded_date_picker` is Gregorian-only. Iranian agents will be confused.
+5. **No `cached_network_image`** — every avatar/flag re-downloads; no placeholder; no error widget standardization.
+6. **No HTTP cache interceptor** — settings/countries/currencies re-fetched on every cold start.
+7. **No retry interceptor + no timeout configured on Dio** — transient failures kill requests; manual timeout detection in `_handleDioException` will never fire because `connectTimeout`/`receiveTimeout` are unset.
+8. **No deep links / app links / universal links** — emails, SMS, push taps cannot route into the app.
+9. **Single Android notification channel** — agent cannot mute ticket replies while keeping commission alerts.
+10. **No daily settlement / end-of-day report / float management / transaction reversal** — core agent operational features missing.
+11. **`cashOutHistoryEndpoint` and `cashInHistoryEndpoint` point to the same path** (`api_path.dart:59-60`) — likely a copy-paste bug.
+12. **No CI tests** — `flutter test` is absent from `flutter.yml`. No coverage gating.
+13. **iOS `NSFaceIDUsageDescription` is the default placeholder** ("Why is my app authenticating using face id?") — App Store will reject.
+14. **`IOSUnsupportedError` for macos/windows/linux in firebase_options.dart** — fine, but means no desktop agent app.
+15. **`firebase_messaging_service.dart` background handler is registered but `_firebaseMessagingBackgroundHandler` does nothing** — just initializes Firebase. No background processing of push data.
 
 ## Medium Priority Issues (P2)
 
-1. **Filename typo `light_thtme.dart`.** Rename to `light_theme.dart`; update import in `app.dart` line 6.
-2. **`BaseRoute.idVerification` registered twice in `routes_handler.dart`.** Lines 107–111 and 177–181. Deduplicate.
-3. **`InitialBinding` defined but never wired to `GetMaterialApp.initialBinding`.** Either remove or wire up.
-4. **Hard-coded `kDebugMode` `print()` statements in `firebase_messaging_service.dart` lines 40, 49, 54, 71.** Use a proper logger.
-5. **`home_controller.dart` hard-codes language names "English"/"Arabic".** Refactor to be locale-driven.
-6. **All server `message` strings passed verbatim to toast.** No client-side error code → localized message mapping.
-7. **Plain `Image.asset` for icons.** 101 PNG icons should be SVG for smaller APK and better scaling.
-8. **`shimmer` skeleton only on home screen.** Add skeletons to wallets, transactions, invoices, notifications.
-9. **No pagination on wallets, notifications, support tickets, KYC history.**
-10. **Single Android notification channel.** Split into `payments`, `withdraw`, `tickets`, `security`, `marketing`.
-11. **`kotlin.incremental=false`** slows dev iteration.
-12. **`-Xmx8G` gradle JVM args** will OOM small CI runners.
-13. **No splash screen proper native splash.** `launch_background.xml` is just a white color; should use `flutter_native_splash` with the ecardo logo.
-14. **No `flutter_launcher_icons` config for adaptive icons.** Android adaptive icon foreground/background not configured.
-15. **`pubspec.yaml` version comment mismatch** (says Flutter 3.35.7, CI installs 3.44.0).
-16. **`app_ar.arb` has no `@` metadata for parameterized strings** — relies entirely on ICU `{var}` syntax. Verify all parameterized keys (e.g., `invoiceDetailsRefNumber`, `qrCodeMerchantId`, `exchangeMinMaxLabel`) render correctly in Arabic.
-17. **Settings keys read with `!`** (e.g., `getSetting("site_currency")!` in `invoice_pdf.dart`). Will crash if settings fetch fails.
-18. **No `--split-per-abi` build** in CI; ships a fat APK.
+1. **No dark theme** — `ThemeMode.light` hard-coded; `moon_common_icon.png` and `dark_moon_common_icon.png` assets exist but are unused. Either delete the assets or implement the theme.
+2. **`LightTheme` is 11 lines** with no `TextTheme` / `ColorScheme` — every widget redefines `TextStyle` inline, making restyling (e.g. for a future dark theme or a per-region brand color) very expensive.
+3. **121 PNG icons vs 10 SVG** — APK size bloat; convert solid-color icons to SVG.
+4. **No deferred components** — base APK will balloon when CJK fonts are added; consider Play Asset Delivery.
+5. **Inconsistent RTL idiom** — half the files use `Directionality.of(context) == TextDirection.rtl`, half use `Directionality.of(context).name == 'rtl'`. Standardize.
+6. **`initial_bindings.dart` is dead code** — never imported.
+7. **`routes_config.dart` uses `static const` widget instances** — risks stale state across re-navigation for any screen that depends on `initState` re-running.
+8. **No structured error reporting** — no Sentry, no Firebase Crashlytics. Errors are `debugPrint`'d.
+9. **`change_app_package_name` is in `dependencies` not `dev_dependencies`** — ships in the APK unnecessarily.
+10. **No phone number validation per country** — no `libphonenumber` integration.
+11. **No localized country names** — `CountryData.name` is single-string.
+12. **No per-region payment-gateway integration at the client** — depends entirely on server's `/agent/add-money` returning gateway methods; the app just renders them. This is acceptable IF the server supports all regions, but there is no client-side fallback for WeChat/Alipay which require native SDKs that cannot be embedded via a webview.
+13. **No `flutter_secure_storage` migration plan** — when adding it, you must migrate existing tokens from SharedPreferences on first launch (one-shot migration).
+14. **NoSplash `ever` listener leak risk** — `splash_screen.dart:136 ever(settingsService.isSettingsDataLoad, …)` is registered inside `initState` but the controller is not disposed if the listener fires after the widget is unmounted (GetX `ever` returns a `Worker` that should be stored and disposed).
+15. **Two QR/barcode libraries bundled** — `mobile_scanner: ^7.1.3` AND `camerawesome: ^2.5.0`. Pick one to reduce APK size.
 
 ## Low Priority Issues (P3)
 
-1. **README.md missing.** No project documentation.
-2. **No `CHANGELOG.md`.**
-3. **No `.env.example`.**
-4. **No `CODEOWNERS`.**
-5. **No branch protection / PR template** (out of repo scope but worth noting).
-6. **Inconsistent comment style** — some files use `// ----- SECTION -----`, others use `// ===== SECTION =====`.
-7. **`comment_*` keys in ARB files** (82 of them) are passed through to `AppLocalizations` as `String get comment_xxx` — wastes generated code size. Filter them out via `l10n.yaml` `synthetic-package: false` + custom generation, or just delete them from the ARB.
-8. **`api_path.dart` mixes `static const String` and `static String getConverterEndpoint(...)`** — inconsistent.
-9. **`UserProfileController` does not refresh on locale change.** If profile contains localized fields (e.g., country name), they won't update.
-10. **Hard-coded color `Color(0xFF043844)` in `settings_bottom_sheet.dart` line 150** — magic color not in `AppColors`.
-11. **`exit(0)` used to quit app** (home_screen.dart line 38, login_screen.dart line 35) — not recommended on iOS; `SystemNavigator.pop()` is preferred.
-12. **`drawerDashboard` key exists in ARB but drawer uses `drawerDashboard`** — fine, just verify consistency with `navigationHome` (which is "Home" — same concept, two keys).
+1. Typo in `assets_path/png_assets.dart:40-41`: `agentCashOIutReceivedNotification` (capital `OI`).
+2. Typo in `assets/icons/png/common/common_auth-country_icon.png` filename (hyphen vs underscore inconsistency).
+3. `settings_screen.dart:63` hard-codes the literal `"Settings"` instead of `localization.settingsTitle` when `isSettingsMainScreen == true` — leftover from refactoring.
+4. `home_transaction_section.dart:78-90` has an unreadable chained ternary to choose icon padding — refactor to a `switch`.
+5. `transactions_controller.dart:16-30` has a hard-coded `typesList` of strings ("All", "Deposit", "Manual Deposit", "Cashout Commission", …) — these should come from `/get-transaction-types-and-statuses` (the endpoint exists in `api_path.dart:11-12`).
+6. `_handleDioException` in `network_service.dart:360` hard-codes the English string `'An error occurred. Please try again.'` — bypasses localization.
+7. `splash_screen.dart:210` hard-codes `"unzo"` (and the icon shows "Q") — when rebranding to ecardo, also redesign this animation.
+8. `SettingsService.saveLoggedInUserPassword` and `currentPassword` should be removed entirely (see P0 #2).
+9. `firebase.json` and `google-services.json` reference the sibling user app `com.qunzo.user` — should be regenerated for the new ecardo Firebase project without extraneous clients.
+10. No `analysis_options.yaml` lint rules beyond `flutter_lints` — consider `lints` or `very_good_analysis` for stricter hygiene.
 
 ---
 
 ## Recommended Localization Stack for 5 Regions
 
 ### Languages to add
-
-| Locale | ARB file | Native name | Priority |
-|---|---|---|---|
-| `fa` | `app_fa.arb` | فارسی | P0 (Iran is primary market per ecardo.ir) |
-| `zh` | `app_zh.arb` (Simplified) + optionally `app_zh_TW.arb` | 中文(简体) | P0 |
-| `tr` | `app_tr.arb` | Türkçe | P1 |
-| `ru` | `app_ru.arb` | Русский | P1 |
-| `ar` | `app_ar.arb` (exists) | العربية | P0 (UAE) — needs font fix |
-| `en` | `app_en.arb` (exists) | English | — |
+| Code | Display name | Status |
+|---|---|---|
+| `en` | English | existing |
+| `ar` | العربية | existing (font gap) |
+| `fa` | فارسی | **add** |
+| `zh` (or `zh_Hans` + `zh_Hant`) | 中文(简体) / 繁體中文 | **add** |
+| `tr` | Türkçe | **add** |
+| `ru` | Русский | **add** |
 
 ### Fonts to add
+| Locale | Font | Reason |
+|---|---|---|
+| fa | **Vazirmatn** (open-source, OFL) | Persian glyphs, proper伊朗 rendering |
+| ar | **Noto Naskh Arabic** or **Cairo** | Distinct from Vazirmatn (`ي/ك` shaping) |
+| zh | **Noto Sans SC** + (optionally **Noto Sans TC**) | CJK; ~4 MB each — defer via Play Asset Delivery |
+| tr | Plus Jakarta Sans (existing) | Latin + Turkish dotted İ |
+| ru | Plus Jakarta Sans (existing) | Cyrillic already in variable font |
+| en | Plus Jakarta Sans (existing) | — |
 
-| Script | Font | File(s) | Size |
-|---|---|---|---|
-| Latin | Plus Jakarta Sans (existing) | 5 weights | ~700 KB |
-| Arabic | Noto Sans Arabic | 4 weights | ~600 KB |
-| Persian | **Vazirmatn** (preferred for fa) | Variable | ~700 KB |
-| Chinese (Simplified) | Noto Sans SC | Subset or full | 4–8 MB (consider dynamic delivery) |
-| Chinese (Traditional) | Noto Sans TC | (optional) | 4–8 MB |
-| Cyrillic | Plus Jakarta Sans (verify) or Noto Sans | — | — |
-
-Bundle strategy: declare all fonts in `pubspec.yaml` under per-script `family` names, then in `light_theme.dart` set `fontFamilyFallback: ['Noto Sans Arabic', 'Vazirmatn', 'Noto Sans SC']`.
+Implementation: load fonts via `google_fonts` package with bundled cache, or pre-bundle subsetted TTFs. Set per-locale `fontFamily` in a `LocaleAwareThemeProvider` that switches on `Get.locale.languageCode`.
 
 ### Date calendars
-
-| Locale | Calendar | Package |
+| Locale | Calendar | Library |
 |---|---|---|
-| `en`, `tr`, `ru`, `ar-AE` (business) | Gregorian | `intl` (default) |
-| `fa` | **Jalali (Shamsi)** | `shamsi_date` or `persian_datetime_picker` |
-| `ar` (optional personal) | Hijri | `hijri` package |
-| `zh` | Gregorian (with Chinese lunar for festivals) | `intl` + `chinese_lunar_calendar` (optional) |
+| fa | **Jalali (Solar Hijri)** | `shamsi_date` or `jalaali` + custom picker (e.g. `persian_datetime_picker`) |
+| ar | Gregorian (Hijri optional for religious reports) | `intl` + `HijriCalendar` from `intl` (or `hijri` package) |
+| zh | Gregorian | `intl` with `zh_CN` |
+| tr | Gregorian | `intl` with `tr_TR` |
+| ru | Gregorian | `intl` with `ru_RU` |
+| en | Gregorian | existing |
 
-Replace `flutter_rounded_date_picker` (which is Gregorian-only) with a locale-aware picker that switches calendar based on `Locale('fa')`.
+Implement a `LocaleAwareDateFormatter` that picks the right calendar based on `Get.locale.languageCode`, and replace all `DateFormat("dd/MM/yyyy")` call sites.
 
-### Number / currency formatting
-
-- Use `NumberFormat.currency(locale: 'fa', symbol: '﷼', decimalDigits: 0)` for Iranian Rial.
-- Use `NumberFormat.currency(locale: 'ar', symbol: 'د.إ', decimalDigits: 2)` for AED.
-- Use `NumberFormat.currency(locale: 'zh', symbol: '¥', decimalDigits: 2)` for CNY.
-- Use `NumberFormat.currency(locale: 'ru', symbol: '₽', decimalDigits: 2)` for RUB.
-- Use `NumberFormat.currency(locale: 'tr', symbol: '₺', decimalDigits: 2)` for TRY.
-- For Persian/Arabic digits, ensure `NumberFormat(..., 'fa')` / `'ar'` is used (it auto-converts to ۰۱۲۳ / ٠١٢٣).
-
-### Payment gateways per region
-
-| Region | Gateways | Client action |
+### Digit rendering
+| Locale | Digits | Implementation |
 |---|---|---|
-| Iran | Zarinpal, Shaparak, Sadad, Melli, Sep, Asan Pardakht | Backend-driven via `paymentGatewayUrl`; verify WebView 3DS redirect works |
-| China | WeChat Pay, Alipay, UnionPay | Native SDK integration (`fluwx`, `tobias`) — WebView alone won't work for in-app payments |
-| Russia | YooMoney, Mir, SberPay, Tinkoff Pay | Backend-driven; verify Mir 3DS |
-| Turkey | iyzico, PayTR, Papara | Backend-driven; verify 3DS |
-| UAE | PayTabs, Network International, Telr, Stripe | Backend-driven |
+| fa | Persian `۰۱۲۳۴۵۶۷۸۹` | helper `toPersianDigits(String)` invoked after `toStringAsFixed` and inside `DateFormat.format` |
+| ar | Arabic-Indic `٠١٢٣٤٥٦٧٨٩` (optional, many Arabic apps keep Latin) | helper `toArabicDigits` (configurable) |
+| zh, tr, ru, en | Latin | — |
+
+Use `NumberFormat.decimalPatternDigits(locale: ..., decimalDigits: …)` for proper separators.
+
+### Payment gateways per region (client-side integration)
+| Region | Gateway | Notes |
+|---|---|---|
+| Iran | Shaparak (via server-side gateway method), Zarinpal, NextPay, Asan Pardakht | All are server-redirect → `webview_flutter` already in deps. **Add Sheba/IRIBAN validator** for withdraw accounts. |
+| China | WeChat Pay, Alipay, UnionPay | **WeChat & Alipay require native SDKs** — `tobias` (Alipay) and `fluwx` (WeChat) packages. Cannot be done via webview on Chinese devices. |
+| Russia | YooMoney, Mir, SBP QR (`ru.sbp.params`) | SBP QR is a standard QR the existing scanner can parse. Mir is a card brand; needs `credit_card_number_validator` extension. |
+| Turkey | iyzico, PayTR, Papara | Mostly webview-redirect; Papara has a native deep-link `papara://`. |
+| UAE | PayTabs, Network International, Checkout.com | Webview-redirect. Add **VAT 5%** display helper. |
 
 ### Push alternatives per region
-
-| Region | Primary | Fallback |
+| Region | Provider | Library |
 |---|---|---|
-| Iran | FCM | Pushe (Iranian) or self-hosted WebSocket |
-| China | **HMS Push Kit** (Huawei) + **JPush** (covers OPPO/Vivo/Xiaomi/Meizu) | FCM (unavailable) |
-| Russia | FCM | RuStore Push (if distributing via RuStore) |
-| Turkey | FCM | — |
-| UAE | FCM | — |
+| China | **HMS Push Kit** (Huawei) + **JPush** (Xiaomi/Oppo/Vivo) | `huawei_push` + `jpush_flutter` |
+| Iran | **Pushe** (Iranian) + **MQTT fallback** | `pushe_flutter` (or unofficial) + `mqtt_client` |
+| Russia | FCM (works) | existing |
+| Turkey | FCM (works) | existing |
+| UAE | FCM (works) | existing |
 
-Implement a `PushService` abstraction with region-specific providers selected at runtime based on device locale / SIM ISO / backend config.
+Detection: use `device_info_plus` (already in deps) to identify OEM / presence of GMS, then register with the appropriate provider(s). Server should store per-device-token with provider tag.
 
-### Phone validation
+### Agent-specific per-region additions
+| Region | Feature | Implementation |
+|---|---|---|
+| Iran | Jalali date picker in reports | `persian_datetime_picker` + custom `CommonSingleDatePicker` variant |
+| Iran | Sheba IBAN validator | `sheba_validator` regex `^IR\d{24}$` |
+| Iran | Persian cash denominations | New `CashDenominationPicker(bottom-sheet)` with IRR 50k/100k/500k/1M |
+| China | Chinese ID validator | regex `^\d{17}[\dXx]$` + checksum |
+| China | Real-name auth bridge | server-side; client just relays |
+| Russia | INN validator | regex + checksum (10/12 digit) |
+| Russia | SBP QR generator | `qr_flutter` with `ru.sbp.params` payload |
+| Turkey | T.C. Kimlik validator | 11-digit algorithm |
+| Turkey | Z-raport / daily close | New `EndOfDayReportScreen` |
+| UAE | Emirates ID validator | 15-digit regex |
+| UAE | VAT display | `price * 1.05` toggle in settings |
 
-Add `libphonenumber_plugin` (or `phone_number`) and validate on Personal Info and Profile Settings screens per selected country code.
+### Recommended library additions to `pubspec.yaml`
+```yaml
+dependencies:
+  flutter_secure_storage: ^9.2.2   # P0 token storage
+  cached_network_image: ^3.4.1     # P1 image cache
+  dio_cache_interceptor: ^3.5.0    # P1 HTTP cache
+  dio_smart_retry: ^6.0.0          # P1 retry on transient errors
+  clock: ^1.1.1                    # for testable DateTime
+  libphonenumber_plugin: ^0.3.3    # P2 phone validation
+  shamsi_date: ^0.17.0             # Iran Jalali
+  persian_datetime_picker: ^2.7.0  # Iran date picker
+  hijri: ^3.0.0                    # optional Hijri
+  google_fonts: ^6.2.1             # font delivery (with cache)
+  fluwx: ^4.5.5                    # China WeChat (conditional)
+  tobias: ^3.0.0                   # China Alipay (conditional)
+  jpush_flutter: ^4.0.0            # China push (conditional)
+  pushe_flutter: ^2.0.0            # Iran push (conditional)
+  sentry_flutter: ^8.9.0           # P2 error reporting
+  url_launcher: ^6.3.1             # P1 SMS / settings deep links (currently uses android_intent_plus only)
 
-### IBAN / bank account validation
-
-- Iran: `iran_sheba` package or regex `^IR\d{24}$`.
-- Turkey: standard IBAN regex `^TR\d{2}\s?\d{4}\s?\d{4}\s?...`.
-- Russia: standard Russian bank account (20 digits) + BIK (9 digits).
-- UAE: standard IBAN `^AE\d{2}\s?\d{3}\s?\d{16}$`.
-
-### ID verification per region
-
-- Iran: National ID (کد ملی) — 10-digit checksum.
-- China: 身份证 — 18-digit checksum.
-- Russia: INN (10 or 12 digits), SNILS.
-- Turkey: T.C. Kimlik No — 11-digit checksum.
-- UAE: Emirates ID — 15 digits with checksum.
-
-The backend `/get-register-fields/merchant` endpoint should return region-specific KYC fields; the client's `auth_id_verification` screen uses dynamic field rendering (`file_type_section.dart`, `camera_type_section.dart`) which can accommodate this — just ensure the validators exist.
+dev_dependencies:
+  flutter_test: { sdk: flutter }
+  flutter_lints: ^5.0.0
+  build_runner: ^2.4.0
+  json_serializable: ^6.8.0        # replace manual fromJson
+  mocktail: ^1.0.4                 # tests (none exist today)
+```
 
 ---
 
@@ -791,31 +816,25 @@ The backend `/get-register-fields/merchant` endpoint should return region-specif
 
 | Category | Count |
 |---|---|
-| Total Dart files in `lib/` | **193** |
-| Screens (top-level `*_screen.dart` and equivalents under `view/`) | **37** |
-| All view files (including `sub_sections/`) | **76** |
-| Controllers (under `screens/`) | **37** |
-| Models (under `screens/`) | **17** |
-| Common controllers | **5** |
-| Common models | **5** |
-| Common services | **4** |
-| Common widgets | **14** |
-| Presentation widgets | **10** |
-| Helper files | **3** |
-| ARB keys (English, excluding `comment_*`) | **478** |
-| ARB keys (English, total including comments) | **560** |
-| ARB files | **2** (`app_en.arb`, `app_ar.arb`) |
-| PNG icon assets | **101** |
-| SVG icon assets | **10** |
-| Other PNG assets (logos, frames, shapes, wallet images, avatars, welcome) | **28** |
-| Total PNG assets | **129** |
-| JSON (Lottie) assets | **1** |
-| Fonts | **5** (Plus Jakarta Sans, 4 weights + 1 variable) |
-| GetX routes (`BaseRoute.*`) | **34** |
-| GetPage registrations | **33** (one route registered twice) |
-| Bindings | **~30** (in `app_bindings.dart`) |
-| Test files | **0** |
-| CI workflows | **1** (Android only) |
-| Firebase projects referenced | **1** (`qunzo-b2252`, shared with agent+user apps) |
-| Languages supported | **2** (`en`, `ar`) |
-| Languages needed for 5 regions | **6** (`en`, `ar`, `fa`, `zh`, `tr`, `ru`) |
+| Total Dart files under `lib/src/presentation/screens/` | **131** |
+| Feature directories (under `screens/`) | **14** |
+| Controllers (`*/controller/*.dart`) | **41** |
+| Models (`*/model/*.dart`) | **24** |
+| Shared widgets under `lib/src/presentation/widgets/` | **10** |
+| Named routes (`BaseRoute` constants) | **35** |
+| `GetPage` route registrations | **31** |
+| GetX Binding classes (`app_bindings.dart` + `initial_bindings.dart`) | **37** (1 unused) |
+| ARB files in `lib/l10n/` | **2** (`app_en.arb`, `app_ar.arb`) |
+| Total keys in `app_en.arb` (incl. comments + @@locale) | **598** |
+| Real translation strings (excl. `comment_*` keys) | **~505** |
+| PNG icons under `assets/icons/png/` | **121** |
+| SVG icons under `assets/icons/svg/` | **10** |
+| Image PNGs under `assets/images/` | **22** |
+| Fonts bundled | **5** (all `Plus Jakarta Sans`) |
+| ProGuard/R8 rule files | **0** |
+| CI/CD config files | **1** (`.github/workflows/flutter.yml`) |
+| Test files (`*_test.dart`) | **0** |
+
+---
+
+*End of audit.*
