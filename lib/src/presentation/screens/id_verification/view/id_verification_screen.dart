@@ -7,6 +7,7 @@ import 'package:qunzo_agent/src/common/widgets/app_bar/common_app_bar.dart';
 import 'package:qunzo_agent/src/common/widgets/app_bar/common_default_app_bar.dart';
 import 'package:qunzo_agent/src/common/widgets/common_loading.dart';
 import 'package:qunzo_agent/src/presentation/screens/id_verification/controller/id_verification_controller.dart';
+import 'package:qunzo_agent/src/presentation/screens/kyc_level/view/kyc_level_badge.dart';
 
 class IdVerificationScreen extends StatefulWidget {
   const IdVerificationScreen({super.key});
@@ -67,6 +68,9 @@ class _IdVerificationScreenState extends State<IdVerificationScreen> {
                         child: Column(
                           children: [
                             const SizedBox(height: 30),
+                            // v57: KYC Level Badge
+                            const KycLevelBadge(),
+                            const SizedBox(height: 20),
                             _buildVerificationSection(),
                           ],
                         ),
