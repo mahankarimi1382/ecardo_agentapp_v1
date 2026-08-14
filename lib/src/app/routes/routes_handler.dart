@@ -218,4 +218,10 @@ List<GetPage> routesHandler = [
     name: BaseRoute.maintenanceMode,
     page: () => RoutesConfig.maintenanceMode,
   ),
+
+  // App self-update (in-app updater)
+  GetPage(
+    name: BaseRoute.appUpdate,
+    page: () => RoutesConfig.appUpdate,
+  ),
 ];

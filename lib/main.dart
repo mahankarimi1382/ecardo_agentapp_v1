@@ -10,6 +10,8 @@ import 'package:qunzo_agent/src/common/service/local_notification_service.dart';
 import 'package:qunzo_agent/src/common/service/settings_service.dart';
 import 'package:qunzo_agent/src/network/service/network_service.dart';
 import 'package:qunzo_agent/src/network/service/token_service.dart';
+import 'package:qunzo_agent/src/common/service/app_update_controller.dart';
+
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -30,12 +32,16 @@ Future<void> _initializeServices() async {
   Get.put(SettingsService());
   final localNotificationsService = LocalNotificationsService.instance();
   await localNotificationsService.init();
+  FirebaseMessagingService.configure(updateTopic: 'app_updates_agent');
   final firebaseMessagingService = FirebaseMessagingService.instance();
   await firebaseMessagingService.init(
     localNotificationsService: localNotificationsService,
   );
   Get.put<TokenService>(TokenService());
   Get.put(NetworkService());
+
+  // In-app self-update controller (v1.0.1+1)
+  Get.put(AppUpdateController(config: AppUpdateConfig.agent), permanent: true);
 }
 
 void _configureUI() {

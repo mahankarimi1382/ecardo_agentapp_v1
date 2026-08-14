@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:qunzo_agent/l10n/app_localizations.dart';
 import 'package:qunzo_agent/src/app/constants/app_colors.dart';
+import 'package:qunzo_agent/src/common/service/app_update_controller.dart';
 import 'package:qunzo_agent/src/app/constants/assets_path/png_assets.dart';
 import 'package:qunzo_agent/src/app/routes/routes.dart';
 import 'package:qunzo_agent/src/common/service/settings_service.dart';
@@ -43,6 +44,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final localization = AppLocalizations.of(context)!;
+
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, __) {
@@ -136,6 +138,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ],
           const SizedBox(height: 12),
           _buildBiometric(),
+          const SizedBox(height: 25),
+          // ----- App self-update entry -----
+          _buildNavigation(
+            icon: PngAssets.arrowRightCommonIcon,
+            title: "Check for Updates",
+            onTap: () => Get.toNamed(BaseRoute.appUpdate),
+          ),
+          const SizedBox(height: 16),
+          // ----- Auto-update toggle -----
+          Padding(
+            padding: const EdgeInsetsDirectional.symmetric(horizontal: 18),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.auto_mode_rounded,
+                    color: AppColors.lightPrimary,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Auto-update',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                            color: AppColors.lightTextPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Automatically check and notify about new versions.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppColors.lightTextSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Obx(() {
+                    final controller = Get.isRegistered<AppUpdateController>()
+                        ? Get.find<AppUpdateController>()
+                        : null;
+                    final enabled =
+                        controller?.autoUpdateEnabled.value ?? true;
+                    return Switch.adaptive(
+                      value: enabled,
+                      activeColor: AppColors.lightPrimary,
+                      onChanged: controller == null
+                          ? null
+                          : (v) => controller.setAutoUpdateEnabled(v),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ),
           const SizedBox(height: 16),
         ],
       ),

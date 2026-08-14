@@ -34,6 +34,8 @@ import 'package:qunzo_agent/src/presentation/screens/withdraw/view/create_withdr
 import 'package:qunzo_agent/src/presentation/screens/withdraw/view/withdraw_screen.dart';
 import 'package:qunzo_agent/src/presentation/widgets/maintenance_mode.dart';
 import 'package:qunzo_agent/src/presentation/widgets/no_internet_connection.dart';
+import 'package:qunzo_agent/src/presentation/screens/app_update/view/app_update_screen.dart';
+
 
 class RoutesConfig {
   static const splash = SplashScreen();
@@ -72,4 +74,7 @@ class RoutesConfig {
   static const noInternetConnection = NoInternetConnection();
   static const exchange = ExchangeScreen();
   static const maintenanceMode = MaintenanceMode();
+
+  // App self-update (in-app updater)
+  static const appUpdate = AppUpdateScreen();
 }
