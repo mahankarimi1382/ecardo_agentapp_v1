@@ -36,7 +36,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'package:qunzo_agent/src/common/service/app_update_controller.dart';
-import 'package:qunzo_agent/src/common/service/local_notifications_service.dart';
+import 'package:qunzo_agent/src/common/service/local_notification_service.dart';
 import 'package:qunzo_agent/src/common/service/settings_service.dart';
 
 /// The FCM topic this app instance subscribes to for app-update broadcasts.
