@@ -1,13 +1,10 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
-import 'package:http_parser/http_parser.dart';
-import 'package:flutter/src/helper/toast_helper.dart';
-import 'package:flutter/src/network/api/api_path.dart';
-import 'package:flutter/src/network/response/status.dart';
-import 'package:flutter/src/network/service/network_service.dart';
-import 'package:flutter/src/presentation/screens/kyc_level/model/kyc_level_model.dart';
-import 'kyc_file_reader_stub.dart' if (dart.library.io) 'kyc_file_reader_io.dart';
+import 'package:/src/helper/toast_helper.dart';
+import 'package:/src/network/api/api_path.dart';
+import 'package:/src/network/response/status.dart';
+import 'package:/src/network/service/network_service.dart';
+import 'package:/src/presentation/screens/kyc_level/model/kyc_level_model.dart';
 
 class KycLevelController extends GetxController {
   final NetworkService _networkService = Get.find<NetworkService>();
@@ -44,19 +41,10 @@ class KycLevelController extends GetxController {
   Future<bool> submitDocuments({required Map<String, String> documents, int? targetLevel}) async {
     isSubmitting.value = true;
     try {
-      final formData = <String, dynamic>{};
-      if (targetLevel != null) formData['level'] = targetLevel.toString();
-      for (final entry in documents.entries) {
-        final fileName = entry.value.split('/').last;
-        final mimeType = _getMimeType(fileName);
-        final bytes = await KycFileReader.readBytes(entry.value);
-        if (bytes != null) {
-          formData['documents[\${entry.key}]'] = http_parser.MultipartFile.fromBytes(bytes, filename: fileName, contentType: MediaType.parse(mimeType));
-        } else {
-          formData['documents[\${entry.key}]'] = entry.value;
-        }
-      }
-      final response = await _networkService.post(endpoint: ApiPath.kycLevelSubmitEndpoint, data: formData);
+      final response = await _networkService.post(
+        endpoint: ApiPath.kycLevelSubmitEndpoint,
+        data: {'documents': documents, if (targetLevel != null) 'level': targetLevel},
+      );
       isSubmitting.value = false;
       if (response.status == Status.completed) {
         ToastHelper().showSuccessToast(response.data?['data']?['message'] ?? 'Documents submitted.');
@@ -74,16 +62,4 @@ class KycLevelController extends GetxController {
   bool get isPending => status.value?.kycStatus == 'pending';
   bool get isRejected => status.value?.isRejected ?? false;
   KycNextLevel? get nextLevel => status.value?.nextLevel;
-
-  String _getMimeType(String fileName) {
-    final ext = fileName.toLowerCase().split('.').last;
-    switch (ext) {
-      case 'jpg': case 'jpeg': return 'image/jpeg';
-      case 'png': return 'image/png';
-      case 'pdf': return 'application/pdf';
-      case 'gif': return 'image/gif';
-      case 'webp': return 'image/webp';
-      default: return 'application/octet-stream';
-    }
-  }
 }
