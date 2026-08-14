@@ -10,6 +10,7 @@ class AppColors {
 
   // Text Colors
   static const Color lightTextPrimary = Color(0xFF0C0310);
+  static const Color lightTextSecondary = Color(0xFF6B6B6B);
   static Color lightTextTertiary = Color(0xFF0C0310).withValues(alpha: 0.60);
 
   // Error/Warning/Success
