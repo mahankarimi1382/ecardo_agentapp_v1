@@ -101,7 +101,6 @@ class ApiPath {
   // Id Verification Endpoints
   static const String userKycEndpoint = '/agent/kyc';
   static const String kycHistoryEndpoint = '/agent/kyc/history';
-  static const String kycRejectedEndpoint = '/agent/kyc/rejected-data';
 
   // v57: KYC Level Endpoints
   static const String kycLevelLevelsEndpoint = '/agent/kyc-level/levels';
