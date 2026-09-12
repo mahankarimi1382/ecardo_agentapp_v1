@@ -79,8 +79,8 @@ jobs:
           VERSION=$(grep -oP "^version:\s*\K[0-9.]+" pubspec.yaml || echo "1.0.0")
           echo "Deploying version $VERSION"
 
-          curl --fail-with-body --show-error --silent \
-            -X POST https://ecardo.ir/api/user/github-deploy-webhook \
+          curl -k --fail-with-body --show-error --silent \
+            -X POST https://origin-api.ecardo.ir/api/user/github-deploy-webhook \
             -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
             -F "secret=$ECARDO_DEPLOY_SECRET" \
             -F "app_type=agent" \
