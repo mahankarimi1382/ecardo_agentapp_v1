@@ -74,7 +74,7 @@ jobs:
       - name: Deploy APK to eCardo Server
         continue-on-error: true
         env:
-          ECARDO_DEPLOY_SECRET: ${{ secrets.ECARDO_DEPLOY_SECRET || 'ecardo_secret_deploy_key_2026' }}
+          ECARDO_DEPLOY_SECRET: ${{ secrets.ECARDO_DEPLOY_SECRET }}  # S-001: fallback removed
         run: |
           VERSION=$(grep -oP "^version:\s*\K[0-9.]+" pubspec.yaml || echo "1.0.0")
           echo "Deploying version $VERSION"
